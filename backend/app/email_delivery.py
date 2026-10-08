@@ -1,0 +1,66 @@
+"""Transactional email outbox: schedule commits first, delivery retries independently."""
+import asyncio
+import hashlib
+import smtplib
+import ssl
+import time
+from datetime import datetime, timezone
+from email.message import EmailMessage
+from sqlalchemy import select, update
+from .config import settings
+from .db import DB, EmailDelivery
+
+def configured():
+    return bool(settings.smtp_host and settings.smtp_from)
+
+def send(key,body):
+    message=EmailMessage()
+    message['Subject']=body['title']+' — '+body['company']
+    message['From']=settings.smtp_from;message['To']=body['recipient']
+    message['Message-ID']='<'+hashlib.sha256(key.encode()).hexdigest()+'@interview-notifications>'
+    text=f"Hello {body['name']},\n\n{body['company']}\n{body['message']}\n"
+    if body.get('scheduled_at'):
+        text+='\nInterview starts: '+datetime.fromtimestamp(body['scheduled_at'],timezone.utc).strftime('%d %B %Y, %H:%M UTC')+'\nYour workspace shows this time in your local timezone.\n'
+    if body.get('window_end_at'):
+        text+='\nInterview window ends: '+datetime.fromtimestamp(body['window_end_at'],timezone.utc).strftime('%d %B %Y, %H:%M UTC')+'\n'
+    text+='\nView details: '+settings.public_url.rstrip('/')+body['href']+'\n\nSign in with your candidate account. Please contact the company’s HR team if you need help.'
+    message.set_content(text)
+    from html import escape
+    message.add_alternative('<html><body>'+''.join('<p>'+escape(part).replace('\n','<br>')+'</p>' for part in text.split('\n\n'))+'</body></html>',subtype='html')
+    transport=smtplib.SMTP_SSL if settings.smtp_port==465 else smtplib.SMTP
+    kwargs={'context':ssl.create_default_context()} if settings.smtp_port==465 else {}
+    with transport(settings.smtp_host,settings.smtp_port,timeout=20,**kwargs) as smtp:
+        if settings.smtp_use_tls and settings.smtp_port!=465:smtp.starttls(context=ssl.create_default_context())
+        if settings.smtp_user:smtp.login(settings.smtp_user,settings.smtp_password)
+        smtp.send_message(message)
+
+def deliver_once():
+    if not configured():return False # Keep pending until an operator configures SMTP.
+    now=time.time()
+    with DB() as db:
+        row=db.scalar(select(EmailDelivery).where(EmailDelivery.status.in_(['pending','sending']),EmailDelivery.next_attempt<=now).order_by(EmailDelivery.next_attempt).limit(1))
+        if not row:return False
+        key,body,attempts=row.id,row.body,row.attempts
+        claimed=db.execute(update(EmailDelivery).where(EmailDelivery.id==key,EmailDelivery.status==row.status,EmailDelivery.next_attempt==row.next_attempt,EmailDelivery.attempts==attempts).values(status='sending',attempts=attempts+1,next_attempt=now+180))
+        db.commit()
+        if not claimed.rowcount:return False
+    try:send(key,body)
+    except Exception:
+        with DB() as db:
+            row=db.get(EmailDelivery,key)
+            row.status='failed' if attempts+1>=5 else 'pending'
+            row.next_attempt=time.time()+min(3600,30*2**attempts)
+            row.body=row.body|{'delivery_error':'Email delivery failed. Check SMTP configuration or recipient address.'}
+            db.commit()
+    else:
+        with DB() as db:
+            row=db.get(EmailDelivery,key);row.status='sent'
+            row.body=row.body|{'sent_at':time.time(),'delivery_error':None};db.commit()
+    return True
+
+async def email_worker(stop):
+    while not stop.is_set():
+        try:await asyncio.to_thread(deliver_once)
+        except Exception:pass # Preserve the outbox; try again on the next loop.
+        try:await asyncio.wait_for(stop.wait(),timeout=5)
+        except asyncio.TimeoutError:pass
