@@ -1,4 +1,9 @@
 .venv
+.venv311
+**/.npm-cache
+**/dist
+**/*.tsbuildinfo
+frontend/public/models/grounding-dino/onnx/*.onnx
 **/node_modules
 .git
 .env
