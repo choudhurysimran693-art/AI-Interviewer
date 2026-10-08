@@ -1,0 +1,70 @@
+.interview-workspace{max-width:1440px;margin:0 auto;color:var(--green);--interview-border:var(--line)}
+.interview-workspace .page-heading{margin:24px 0;align-items:center;gap:20px}
+.interview-workspace .page-heading h1{font-size:clamp(26px,3vw,38px);letter-spacing:-1.1px;line-height:1.2;margin:10px 0}
+.interview-workspace .pill{font-variant-numeric:tabular-nums;background:#fff;border-color:var(--interview-border);padding:12px 16px;font-size:13px;white-space:nowrap}
+.interview-workspace .interview-focus-banner{padding:16px 20px;border-radius:12px;box-shadow:none;margin-bottom:16px;border-left:3px solid #7d9878;font-size:13px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.interview-focus-banner p{margin:0;flex:1 1 360px;line-height:1.6}
+.interview-workspace .identity-card{padding:20px 24px;margin:16px 0;border-radius:16px;font-size:13px}
+.interview-workspace .identity-card h3{margin:0 0 12px}
+.interview-workspace .identity-card p{margin:10px 0;line-height:1.6}
+.interview-workspace .identity-card button{border:1px solid #ccd9d0;border-radius:8px;padding:10px 16px;background:#fff;color:#244b3e;font:inherit;cursor:pointer}
+.interview-workspace .identity-card button:disabled{opacity:.5;cursor:not-allowed}
+.interview-workspace .interview-studio{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start;margin-top:24px}
+.interview-workspace .question-panel{border:1px solid var(--interview-border);border-top:4px solid #244b3e;border-radius:18px;padding:32px;background:#fff;box-shadow:0 8px 32px #183d3306;min-width:0}
+.interview-workspace .question-meta{font-size:12px;letter-spacing:.08em;font-weight:600;margin-top:24px}
+.interview-workspace .question-progress{gap:6px;margin:16px 0 28px}
+.interview-workspace .question-progress i{height:5px;border-radius:4px;background:#edf1eb}
+.interview-workspace .question-progress i.filled{background:#54785c}
+.interview-workspace .question-text{font-size:clamp(23px,2.3vw,32px);line-height:1.4;letter-spacing:-.5px;margin:0 0 24px;max-width:42ch;animation:question-enter .2s ease-out}
+.interview-workspace .basis{border-radius:8px;background:#f3f6f2;padding:12px 16px;margin-bottom:24px;font-size:13px}
+.interview-workspace .answer-text{background:#fcfdfb;border:1px solid #cbd9d0;border-radius:12px;min-height:200px;max-height:420px;font-size:16px;line-height:1.7;padding:20px;transition:border-color .15s,box-shadow .15s}
+.interview-workspace .answer-text:focus{outline:2px solid #6b8d71;outline-offset:2px;box-shadow:0 0 0 5px #edf2ea}
+.interview-workspace .answer-actions{padding-top:20px;margin-top:20px;gap:12px;flex-wrap:wrap}
+.interview-workspace button{transition:background .15s,box-shadow .15s,opacity .15s}
+.interview-workspace button:focus-visible,.interview-workspace summary:focus-visible{outline:2px solid #426c54;outline-offset:3px}
+.interview-workspace .exam-notice{padding:12px 16px;margin-bottom:24px;font-size:12px;line-height:1.6;border-radius:10px}
+.interview-workspace .interview-studio>aside{display:flex;flex-direction:column;gap:16px;min-width:0}
+.interview-workspace .camera-card{border:1px solid var(--interview-border);border-radius:16px;margin:0;overflow:hidden;box-shadow:0 4px 16px #193e3405}
+.interview-workspace .camera-view{aspect-ratio:16/10;background:#e7ede3}
+.interview-workspace .camera-view video{width:100%;height:100%;object-fit:cover}
+.interview-workspace .camera-info{padding:16px;font-size:12px}
+.interview-workspace .camera-info p{margin:6px 0;line-height:1.5}
+.interview-workspace .camera-info .text-button{font-size:11px;margin:6px 10px 0 0}
+.interview-workspace .monitoring-dashboard{margin:0;padding:20px;border-radius:16px;border:1px solid var(--interview-border);font-size:12px}
+.interview-workspace .monitoring-dashboard h3{font-size:16px;margin:0 0 12px}
+.interview-workspace .monitoring-dashboard dl{margin:0}
+.interview-workspace .monitoring-dashboard dd{font-size:12px;overflow-wrap:anywhere}
+.interview-workspace .monitoring-dashboard>dl dd{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.interview-workspace .camera-card.camera-live{border-color:#8da685;box-shadow:0 0 0 3px #e9f0e4,0 4px 16px #193e3408}
+.interview-workspace .monitoring-dashboard dl>div{padding:8px 0}
+.monitoring-details{border-top:1px solid #e1e8df;padding-top:12px;margin-top:12px}
+.monitoring-details summary{cursor:pointer;font-weight:600;line-height:24px}
+.monitoring-details .caption{font-size:11px;line-height:1.6;margin:12px 0 0}
+.interview-support{display:flex;gap:10px;padding:4px 8px;color:#65796b;font-size:12px;line-height:1.6}
+.interview-support svg{flex-shrink:0;margin-top:2px}.interview-support p{margin:4px 0}
+@keyframes question-enter{from{opacity:.4;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(min-width:1200px){.interview-workspace .interview-studio>aside{position:sticky;top:24px}}
+@media(max-width:900px){.interview-workspace .interview-studio{grid-template-columns:minmax(0,1fr)}.interview-workspace .interview-studio>aside{display:grid;grid-template-columns:1fr 1fr;align-items:start}.interview-workspace .page-heading{flex-wrap:wrap}}
+@media(max-width:600px){.interview-workspace .question-panel{padding:20px}.interview-workspace .interview-studio>aside{display:flex}.interview-workspace .identity-card{padding:16px}.interview-workspace .answer-actions>button{width:100%}.interview-workspace .page-heading h1{font-size:26px}}
+@media(prefers-reduced-motion:reduce){.interview-workspace *{animation:none!important;transition:none!important}}
+.equipment-checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:16px 0;padding:14px;border:1px solid #dce7d8;border-radius:10px;background:#f5f8f1;color:#55705c;font-size:13px}.equipment-checks span{padding:6px 0}
+
+.shell.focused-flow .main-column{margin-left:0;width:100%}.focused-flow main{max-width:1440px;margin-inline:auto;width:100%;box-sizing:border-box}.flow-privacy{font-size:.85rem;line-height:1.6;color:#586f62}.flow-privacy svg{vertical-align:middle;margin-right:.35rem}
+/* Focused interview presentation: shared workspace greens and neutral surfaces. */
+.interview-workspace .question-panel{border:1px solid #dce5da;border-top:3px solid #315d49;border-radius:20px;padding:32px;box-shadow:0 8px 28px #24463806}
+.interview-workspace .checkbox{border:1px solid #dce5da;border-radius:12px;padding:16px;line-height:1.65;background:#f4f7f0}
+.interview-workspace .accessibility-control{padding:12px 16px;background:#fff;margin-bottom:8px}
+.caption-disclosure{font-size:12px;color:#65796b;margin-bottom:24px}.caption-disclosure p{margin:6px 0}.caption-disclosure summary,.monitoring-policy summary{cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.monitoring-policy{font-size:13px;color:#65796b;margin:12px 0 24px;line-height:1.65}
+.interview-workspace .equipment-checks{padding:0;background:transparent;border:0;gap:12px;margin:20px 0}
+.equipment-status{display:flex;align-items:center;gap:12px;padding:16px;border:1px solid #dce5da;border-radius:12px;background:#f8faf6;min-width:0}
+.equipment-status.ready>svg{color:#3d7655}.equipment-status.pending>svg{color:#a27736}.equipment-status span{display:block;font-size:12px;color:#65796b;padding:0}.equipment-status strong{display:block;font-size:14px;font-weight:600;margin-top:4px;color:#294638}
+.equipment-readiness{grid-column:1/-1;margin:0;font-size:13px;padding:12px 16px;border-radius:10px;background:#edf3e8;color:#315d49}
+.interview-workspace .question-meta{align-items:center;margin-top:24px;gap:12px}.interview-workspace .question-meta>span:last-child{padding:5px 10px;border-radius:6px;background:#eef3e9;font-size:11px;letter-spacing:.06em}
+.interview-workspace .question-progress{margin:14px 0 24px}.interview-workspace .question-text{font-size:clamp(24px,2.4vw,34px);line-height:1.4;margin:0 0 24px}
+.interview-workspace .basis{border-left:3px solid #89a080;background:#f3f6ef;border-radius:0 10px 10px 0;padding:16px;line-height:1.6;color:#5e7264;align-items:flex-start;margin-bottom:24px}.interview-workspace .basis svg{flex-shrink:0;margin-top:3px}
+.interview-workspace .camera-card{border:1px solid #dce5da;border-radius:18px;box-shadow:0 8px 24px #24463808;overflow:hidden}.interview-workspace .camera-view{overflow:hidden;border-radius:16px 16px 0 0}.interview-workspace .camera-info{padding:20px}.interview-workspace .camera-info .text-button{margin-top:8px;line-height:1.6}
+.interview-workspace .candidate-warning{display:flex;gap:12px;padding:18px;background:#fff1f2;border:1px solid #e6a3a3;border-radius:12px;color:#991b1b}.candidate-warning>svg{flex-shrink:0;margin-top:2px}.candidate-warning>div{display:flex;flex-direction:column;gap:12px}.candidate-warning .text-button{align-self:flex-start;border:1px solid #d79898;border-radius:6px;padding:5px 10px;line-height:1.4}
+.interview-workspace .answer-text{border:1px solid #ccd9cb;border-radius:12px;background:#fff;padding:18px;line-height:1.7}.interview-workspace .answer-text:focus{outline:2px solid #6e946f;outline-offset:2px}.interview-workspace .button{border-radius:9px;min-height:46px;transition:background .15s}.interview-workspace .button:not(:disabled):hover{filter:brightness(.94)}.interview-workspace button:focus-visible,.interview-workspace summary:focus-visible{outline:2px solid #527d57;outline-offset:3px}
+.interview-workspace .transcript-status{font-size:12px;color:#7b847e}.interview-workspace .interview-support{padding:0 6px;font-size:12px;background:transparent;border:0}.interview-workspace .caption:empty{display:none}
+@media(max-width:600px){.interview-workspace .question-panel{padding:20px}.equipment-status{padding:12px;gap:8px}.equipment-status strong{font-size:13px}}

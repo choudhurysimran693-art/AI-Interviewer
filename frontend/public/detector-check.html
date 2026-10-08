@@ -1,0 +1,10 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Local detector check</title>
+<h1>Local detector check</h1><p>Selected images stay in this browser. Results show model confidence and CPU inference time.</p>
+<input type="file" accept="image/*" aria-label="Test image"><pre id="output">Loading detector…</pre>
+<script>
+const worker=new Worker('/device-monitor.js');let file,ready=false;
+worker.onmessage=async({data})=>{document.querySelector('#output').textContent=JSON.stringify(data,null,2);if(data.type==='ready'){ready=true;if(file)run();}};
+worker.onerror=e=>document.querySelector('#output').textContent=e.message;
+async function run(){const frame=await createImageBitmap(file);worker.postMessage({type:'frame',frame,timestamp:performance.now()},[frame]);}
+document.querySelector('input').onchange=e=>{file=e.target.files[0];if(ready&&file)run();};worker.postMessage({type:'init'});
+</script></html>

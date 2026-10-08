@@ -1,0 +1,13 @@
+{
+  "revision": "ff690b0a8050566c290287545bd059350f3e9096",
+  "sha256": {
+    "face": "b4578f35940bf5a1a655214a1cce5cab13eba73c1297cd78e1a04c2380b0152f",
+    "config.json": "f4b79138d4a83efb56ebad85c194a5a99a57102204c9829f76c0cd109acb0aeb",
+    "preprocessor_config.json": "ffc8a8a93bb1782cc6f84a37b83babb0660bb19146e52600c122335a798b503f",
+    "special_tokens_map.json": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a",
+    "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+    "tokenizer_config.json": "5723ed14feabd5c974010123a7c93005116bdc5e3d69bcce3d9334987241f53c",
+    "vocab.txt": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+    "onnx/model_quantized.onnx": "70bf2d3310d1ae73769c96a71e00cbf2861eb33a1f4d97d84a108a7bf02c03c9"
+  }
+}
