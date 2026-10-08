@@ -20,6 +20,8 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY --chown=user backend ./backend
 COPY --from=web --chown=user /build/frontend/dist ./frontend/dist
+# WORKDIR is owned by root; pre-create writable runtime storage before dropping privileges.
+RUN mkdir -p /home/user/app/data && chown user:user /home/user/app/data
 USER user
 ENV PYTHONPATH=/home/user/app/backend PORT=7860 DATA_DIR=/home/user/app/data
 EXPOSE 7860
