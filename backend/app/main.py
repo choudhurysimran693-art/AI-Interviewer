@@ -19,7 +19,7 @@ from pypdf import PdfReader
 from docx import Document
 from .config import settings
 from .db import DB, init_db, Session, Question, Answer, Observation, Snapshot, Feelings, Consent, Job, Report, uid
-from .schemas import SessionInput, TranscriptInput, FeelingsInput, Heartbeat, ObservationInput, ConsentInput, ExplanationInput, ViolationInput
+from .schemas import SessionInput, TranscriptInput, FeelingsInput, Heartbeat, ObservationInput, ConsentInput, ExplanationInput, ViolationInput, MCQSubmission
 from .ai import extract_profile, sanitize, generate_questions, aggregate
 from .storage import storage
 from .monitoring import validation_status
@@ -376,7 +376,7 @@ def heartbeat(sid: str, data: Heartbeat, authorization: str = Header(''), db=Dep
     s = active_session(sid, db, authorization)
     config = s.body.get('proctor_config') or load_config(settings.proctor_config_file)
     device_budget=config.get('device_result_max_age_ms',30000)
-    device_enabled = True
+    device_enabled = validation_status()['passed']
     microphone_required = s.body.get('round_type') not in ('aptitude','technical')
     healthy = (data.camera and (data.microphone or not microphone_required) and data.face_age_ms < 5000 and data.evidence_ready
                and (not device_enabled or data.object_age_ms < device_budget and data.object_latency_ms <= device_budget)
@@ -471,6 +471,37 @@ def get_job(jid: str, authorization: str = Header(''), db=Depends(database)):
     job, _ = owned(Job, jid, db, authorization, False)
     a = db.get(Answer, job.body['answer_id'])
     return {'id': jid, **{k: v for k, v in job.body.items() if k != 'path'}, 'answer': {'id': a.id, **a.body} if a else None}
+
+
+@app.post('/api/sessions/{sid}/mcq')
+def submit_mcq(sid:str, data:MCQSubmission, authorization:str=Header(''), db=Depends(database)):
+    from .round_questions import grade_mcq
+    s=active_session(sid,db,authorization)
+    s=db.scalar(select(Session).where(Session.id==sid).with_for_update())
+    monitored(s)
+    q=db.get(Question,data.question_id)
+    if not q or q.session_id!=sid:raise HTTPException(404,'Question not found.')
+    options={o['id'] for o in q.body.get('options',[])}
+    chosen=set(data.selected)
+    if q.body.get('source')!='bank_mcq' or not options or not chosen<=options or (not q.body.get('multiple_select') and len(chosen)!=1):
+        raise HTTPException(422,'Choose a valid option for this question.')
+    if data.duration>q.body.get('time_limit_seconds',90)+1:raise HTTPException(422,'Answer duration exceeds the question limit.')
+    aid=q.id+'-answer'
+    prior=db.get(Answer,aid)
+    if prior and prior.body.get('approved') and prior.body.get('evaluation',{}).get('status')=='scored':
+        return {'id':prior.id,**prior.body}
+    earlier=list(db.scalars(select(Question).where(Question.session_id==sid)))
+    answers={a.body.get('question_id'):a for a in db.scalars(select(Answer).where(Answer.session_id==sid))}
+    if any(x.body['sequence']<q.body['sequence'] and (x.id not in answers or not answers[x.id].body.get('approved') or answers[x.id].body.get('evaluation',{}).get('status')=='pending') for x in earlier):
+        raise HTTPException(409,'Finish the previous question first.')
+    transcript=','.join(sorted(chosen))
+    body={'question_id':q.id,'transcript':transcript,'duration':data.duration,'approved':True,
+          'version':(prior.body.get('version',0) if prior else 0)+1,'metrics':{},'input':'mcq',
+          'evaluation':grade_mcq(q.body,transcript)}
+    if prior:prior.body=body
+    else:db.add(Answer(id=aid,session_id=sid,body=body))
+    db.commit()
+    return {'id':aid,**body}
 
 
 @app.patch('/api/answers/{aid}/transcript')

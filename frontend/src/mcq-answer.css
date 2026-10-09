@@ -1,0 +1,11 @@
+.interview-workspace .mcq-options{border:0;padding:0;margin:24px 0;min-width:0;display:grid;gap:16px}
+.interview-workspace .mcq-options legend{font-size:15px;font-weight:500;color:#567064;padding:0;margin-bottom:14px}
+.interview-workspace .mcq-choice{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:18px;width:100%;min-height:76px;padding:22px 26px;margin:0;box-sizing:border-box;border:1px solid #dce5d7;border-radius:14px;background:#f3f6ed;cursor:pointer;text-align:left}
+.interview-workspace .mcq-choice.selected{background:#e4eee2;border-color:#285442;box-shadow:0 0 0 1px #285442}
+.interview-workspace .mcq-choice input[type=radio],.interview-workspace .mcq-choice input[type=checkbox]{appearance:auto;width:22px;height:22px;min-width:22px;max-width:22px;flex:0 0 22px;padding:0;margin:0;accent-color:#285442;box-shadow:none}
+.interview-workspace .mcq-choice span{display:block;flex:1;text-align:left;font-size:17px;line-height:1.5;color:#274d3d;letter-spacing:normal;text-transform:none}
+.interview-workspace .mcq-choice:focus-within{outline:2px solid #285442;outline-offset:3px}
+.interview-workspace .mcq-options:disabled .mcq-choice{cursor:default;opacity:.7}
+.interview-workspace .mcq-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:22px}
+.interview-workspace .mcq-actions>span{font-size:14px;color:#567064}
+@media(max-width:600px){.interview-workspace .mcq-choice{padding:18px;gap:14px}.interview-workspace .mcq-actions{align-items:stretch;flex-direction:column}}

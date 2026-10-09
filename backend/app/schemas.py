@@ -82,6 +82,12 @@ class FeelingsInput(BaseModel):
         return self
 
 
+class MCQSubmission(BaseModel):
+    question_id: str = Field(min_length=1,max_length=100)
+    selected: list[str] = Field(min_length=1,max_length=20)
+    duration: float = Field(default=0,ge=0)
+
+
 class Heartbeat(BaseModel):
     camera: bool
     microphone: bool = False

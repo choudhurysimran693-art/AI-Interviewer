@@ -22,6 +22,7 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
     if(!config){setStatus('Wait for monitoring configuration to load.');return;}
     const deviceEnabled=config.device_detection_enabled!==false;
     const microphoneRequired=config.microphone_required!==false;
+    const objectRequired=deviceEnabled&&!config.device_warning_only;
     setStatus(microphoneRequired?'Requesting camera and microphone…':'Requesting camera…');setFace('Loading face detector…');setDeviceStatus('Loading object detector…');
     let media:MediaStream|undefined;
     try{
@@ -57,7 +58,7 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
       // Temporary `mute` events happen during device handoff and browser
       // power management. Only `ended` means the track was actually stopped.
       const listeners=live.getTracks().map(track=>{const lost=()=>disconnect(track.kind);track.addEventListener('ended',lost);return()=>track.removeEventListener('ended',lost);});
-      const reportFailure=(name:string,message:string)=>{setHealthy(false);setSelfCheck(false);console.error(`[${name}] ${message}`);setStatus(`${name} unavailable: ${message}. Retry monitoring.`);send({type:'tracking_unavailable',metadata:{detector:name}});};
+      const reportFailure=(name:string,message:string)=>{if(name.includes('detector')&&name!=='Face detector'&&!objectRequired){setDeviceStatus(`Device checks unavailable: ${message}. Answers can continue; HR review is required.`);send({type:'tracking_unavailable',metadata:{detector:name}});return;}setHealthy(false);setSelfCheck(false);console.error(`[${name}] ${message}`);setStatus(`${name} unavailable: ${message}. Retry monitoring.`);send({type:'tracking_unavailable',metadata:{detector:name}});};
       faceWorker.onmessage=({data})=>{
         if(disposed)return;
         if(data.type==='ready')faceReady=true;
@@ -85,7 +86,7 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
         if(data.type==='result'){
           lastObject=performance.now();objectLatency=data.latency;objectCount++;objectFast=data.latency<=deviceBudget;
           const devices=deviceDetections(data.detections,config.device_confidence);
-          tracker.setMaxGap(Math.min(deviceBudget,Math.max(config.device_max_gap_ms,3500,data.latency*2+1000)));
+          tracker.setMaxGap(Math.min(deviceBudget,Math.max(config.device_max_gap_ms,8000,data.latency*2+6000)));
           setDeviceStatus(!objectFast?'Device scan exceeded the time limit. Retry monitoring.':devices.length?`Possible ${devices[0].label} (${Math.round(devices[0].score*100)}%)`:`Scanning camera view · ${(data.latency/1000).toFixed(1)}s per scan`);
           if(current.current.stage==='equipment'||current.current.stage==='finish'){
             if(current.current.stage==='equipment')setWarning(old=>devices.length?`Equipment check: remove the ${devices[0].label} from the camera view before starting.`:old.startsWith('Equipment check:')?'':old);
@@ -122,17 +123,17 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
         setMicActive(microphone);analyser?.getFloatTimeDomainData(samples);
         const rms=Math.sqrt(samples.reduce((n,x)=>n+x*x,0)/samples.length);setAudioLevel(Math.min(1,rms*5));
         recordInterval('background_noise',microphone&&rms>.2&&!['answer','answer_done'].includes(current.current.stage),now,5000);
-        const detectors=faceReady&&lastFace>0&&now-lastFace<5000&&(!deviceEnabled||objectReady&&objectFast&&lastObject>0&&now-lastObject<deviceBudget);
+        const detectors=faceReady&&lastFace>0&&now-lastFace<5000&&(!objectRequired||objectReady&&objectFast&&lastObject>0&&now-lastObject<deviceBudget);
         setSelfCheck(camera&&(!microphoneRequired||microphone)&&detectors&&evidenceReady);
         if(now-started>180000){if(!faceReady&&!faceError){faceError='Startup timed out';reportFailure('Face detector',faceError);}if(deviceEnabled&&!objectReady&&!objectError){objectError='Startup timed out';reportFailure('Device detector',objectError);}}
         if(faceError||objectError)setStatus(`Face detection: ${faceError?'unavailable':lastFace?'active':'starting'}. Device detection: ${objectError?'unavailable':lastObject?'active':'starting'}. Retry monitoring to complete the equipment check.`);
         const focused=!document.hidden&&document.hasFocus();
         const ok=camera&&(!microphoneRequired||microphone)&&detectors&&evidenceReady&&(!hr||focused&&!!fullscreenElement());
         if(!ok)acknowledged.current=0;setHealthy(ok);
-        if(!faceError&&!objectError&&camera&&(!microphoneRequired||microphone))setStatus(!deviceEnabled?(ok?'Camera, microphone and face checks active. Device detection disabled.':'Complete the face check and keep this window active. Device detection disabled.'):ok?(microphoneRequired?'Camera, microphone and detectors active':'Camera and detectors active; microphone not required'):!faceReady||!objectReady?'Loading local detection models…':!lastObject?'Running first object inference…':'Monitoring is not ready. Keep this window active and wait for fresh detector results.');
+        if(!faceError&&(!objectError||!objectRequired)&&camera&&(!microphoneRequired||microphone))setStatus(!objectRequired&&deviceEnabled?(ok?'Camera checks active. Device scanning runs in the background; unavailable scans are flagged for review.':'Complete the camera and face checks, then enter fullscreen.') :!deviceEnabled?(ok?'Camera, microphone and face checks active. Device detection disabled.':'Complete the face check and keep this window active. Device detection disabled.'):ok?(microphoneRequired?'Camera, microphone and detectors active':'Camera and detectors active; microphone not required'):!faceReady||!objectReady?'Loading local detection models…':!lastObject?'Running first object inference…':'Monitoring is not ready. Keep this window active and wait for fresh detector results.');
         if(v&&v.readyState>=2&&camera&&!document.hidden){
           if(faceReady&&!faceBusy){faceBusy=true;try{const frame=await createImageBitmap(v);if(!disposed)faceWorker.postMessage({type:'frame',frame,timestamp:now},[frame]);else frame.close();}catch{faceBusy=false;}}
-          if(objectWorker&&objectReady&&!objectBusy&&now-lastSubmit>=1000){
+          if(objectWorker&&objectReady&&!objectBusy&&now-lastSubmit>=5000&&now-lastObject>=5000){
             objectBusy=true;lastSubmit=now;matchingContext={...current.current};
             matchingFrame=document.createElement('canvas');matchingFrame.width=v.videoWidth;matchingFrame.height=v.videoHeight;matchingFrame.getContext('2d')!.drawImage(v,0,0);
             try{const frame=await createImageBitmap(matchingFrame);if(!disposed)objectWorker.postMessage({type:'frame',frame,timestamp:now},[frame]);else frame.close();}catch{objectBusy=false;}

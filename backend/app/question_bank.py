@@ -58,7 +58,10 @@ def chapter_rows():
     return rows
 
 def seed_bank(db):
+    import json
     from .db import PracticeQuestion
+    from sqlalchemy import select
+    existing={row.id:row for row in db.scalars(select(PracticeQuestion))}
     legacy_chapters={'bank-001':'Hashing','bank-002':'Linked Lists','bank-003':'Hashing'}
     for i,(track,topic,difficulty,text,key,options,rubric) in enumerate(QUESTIONS):
         qid=f'bank-{i+1:03}'
@@ -70,13 +73,17 @@ def seed_bank(db):
               'snippet_text':'','snippet_language':'','time_limit_seconds':75 if options else (300 if track=='technical' else 90)}
         body.update(TECHNICAL_FORMATS.get(qid,{}))
         if body['question_type']!='coding':body['time_limit_seconds']=75
-        row=db.get(PracticeQuestion,qid)
-        if row: row.body=body
+        body=json.loads(json.dumps(body))
+        row=existing.get(qid)
+        if row:
+            if row.body!=body:row.body=body
         else: db.add(PracticeQuestion(id=qid,body=body))
     from .coding_bank import coding_rows
     from .practice_expansion import expanded_rows
     for body in [*chapter_rows(), *coding_rows(), *expanded_rows()]:
-        row=db.get(PracticeQuestion,body['id'])
-        if row: row.body=body
+        body=json.loads(json.dumps(body))
+        row=existing.get(body['id'])
+        if row:
+            if row.body!=body:row.body=body
         else: db.add(PracticeQuestion(id=body['id'],body=body))
     db.commit()

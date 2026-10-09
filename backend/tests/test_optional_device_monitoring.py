@@ -33,6 +33,7 @@ def test_hr_without_validated_device_detector(client, monkeypatch):
                   fullscreen=True, face_age_ms=1, object_age_ms=1,
                   object_latency_ms=1, evidence_ready=True, face_coverage=1, object_coverage=1)
     assert client.post(base + '/monitoring/heartbeat', headers=h, json=health).json()['healthy']
+    assert client.post(base + '/monitoring/heartbeat', headers=h, json=health|{'object_age_ms':999999,'object_latency_ms':999999}).json()['healthy']
     assert client.post(base + '/start', headers=h, json={'rules_acknowledged': True}).status_code == 200
     assert client.post(base + '/questions', headers=h).status_code == 200
     for change in [{'camera': False}, {'microphone': False}, {'face_age_ms': 999999},
