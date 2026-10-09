@@ -262,6 +262,11 @@ DB = sessionmaker(engine, expire_on_commit=False)
 
 def init_db():
     Base.metadata.create_all(engine)
+    from .round_templates import migrate, seed
+    migrate(engine)
+    with DB() as template_db:
+        seed(template_db)
+        template_db.commit()
     from sqlalchemy import inspect, text, select
     if 'organization_id' not in {c['name'] for c in inspect(engine).get_columns('recruitment_positions')}:
         with engine.begin() as connection:
@@ -286,6 +291,7 @@ class InterviewRound(Base):
     round_type: Mapped[str] = mapped_column(String)
     round_name: Mapped[str] = mapped_column(String)
     is_active: Mapped[bool] = mapped_column(default=True)
+    settings: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
 
 
 class ApplicationRound(Base):
@@ -301,3 +307,24 @@ class ApplicationRound(Base):
     completed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     hr_notes: Mapped[str] = mapped_column(String, default='')
+    scheduling: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
+
+
+class RoundTemplate(Base):
+    __tablename__ = 'round_templates'
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    description: Mapped[str] = mapped_column(String)
+    is_default: Mapped[bool] = mapped_column(default=False)
+
+
+class RoundTemplateItem(Base):
+    __tablename__ = 'round_template_items'
+    __table_args__ = (UniqueConstraint('template_id', 'round_order'),)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    template_id: Mapped[str] = mapped_column(ForeignKey('round_templates.id'))
+    round_order: Mapped[int] = mapped_column()
+    round_type: Mapped[str] = mapped_column(String)
+    round_name: Mapped[str] = mapped_column(String)
+    evaluation_mode: Mapped[str] = mapped_column(String)
+    default_instructions: Mapped[str] = mapped_column(String)

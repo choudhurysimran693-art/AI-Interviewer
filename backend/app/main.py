@@ -332,7 +332,7 @@ def create_session(data: SessionInput, db=Depends(database)):
         assignment.session_id=s.id
         if assignment.body.get('application_round_id'):
             round_entry.interview_session_id=s.id;round_entry.status='in_progress'
-            s.body=s.body|{'application_round_id':round_entry.id,'round_type':exam.body.get('round_type')}
+            s.body=s.body|{'application_round_id':round_entry.id,'round_type':exam.body.get('round_type'),'evaluation_mode':exam.body.get('evaluation_mode','ai_conducted')}
         s.body=s.body|{'application_id':assignment.body.get('application_id'),'position_id':assignment.body.get('position_id')}
         db.add(Report(session_id=s.id,role='hr',token_hash=digest(report_token(s.id,'hr')),body={'live':True}))
     db.commit()
@@ -365,7 +365,9 @@ async def questions(sid: str, authorization: str = Header(''), db=Depends(databa
     s = active_session(sid, db, authorization)
     existing = db.scalars(select(Question).where(Question.session_id == sid)).all()
     if not existing:
-        rows = await generate_questions(s.body['profile'], s.body['role'], s.body['level'], s.body.get('round_type'))
+        from .round_questions import select_questions
+        rows = select_questions(db,s.body.get('round_type'),s.body['level']) if s.body.get('evaluation_mode')=='ai_scored' else None
+        if rows is None:rows = await generate_questions(s.body['profile'], s.body['role'], s.body['level'], s.body.get('round_type'))
         # Deterministic primary keys protect concurrent retries.
         for i, q in enumerate(rows):
             db.merge(Question(id=f'{sid}-q{i+1}', session_id=sid, body=q | {'sequence': i+1, 'difficulty': s.body['level']}))

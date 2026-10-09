@@ -32,9 +32,12 @@ if settings.environment == 'production':
     settings.enable_demo_data = False
 Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
 if settings.environment == 'production':
-    if not (len(settings.app_secret) >= 32 and settings.database_url.startswith('postgresql')
-            and settings.supabase_url and settings.supabase_service_key):
-        raise RuntimeError('Production requires Postgres, private Supabase storage, and APP_SECRET (32+ characters).')
+    invalid=[]
+    if len(settings.app_secret)<32:invalid.append('APP_SECRET (at least 32 characters)')
+    if not settings.database_url.startswith('postgresql+psycopg://'):invalid.append('DATABASE_URL (postgresql+psycopg:// connection string)')
+    if not settings.supabase_url.startswith('https://'):invalid.append('SUPABASE_URL (HTTPS project URL)')
+    if not settings.supabase_service_key:invalid.append('SUPABASE_SERVICE_KEY')
+    if invalid:raise RuntimeError('Missing or invalid production settings: '+', '.join(invalid))
 else:
     secret_path = Path(settings.data_dir) / '.secret'
     if not settings.app_secret:

@@ -181,14 +181,14 @@ def transition(db,a,status,user,notes=None):
     a.status=status;a.updated_at=time.time()
     if status=='shortlisted':
         initialize(db,a,user)
-        if not a.assignment_id:
+        if not a.assignment_id and not rounds(db,a.id):
             from .proctoring import ProctorConfig
             now=time.time()
             exam=Examination(hr_id=user.id,body={'title':p.body['title']+' interview','role':p.body['title'],'level':p.body.get('difficulty','junior'),'position_id':p.id,'application_id':a.id,'instructions':'Complete your assigned interview.','interview_type':'role_based','opens_at':now,'window_start_at':now,'window_end_at':now+7*86400,'created_at':now,'policy':ProctorConfig().model_dump()})
             db.add(exam);db.flush()
             assignment=Assignment(id=uid(),exam_id=exam.id,candidate_id=a.candidate_id,body={'status':'assigned','application_id':a.id,'position_id':p.id})
             db.add(assignment);db.flush();a.assignment_id=assignment.id
-        if newly_shortlisted:
+        if newly_shortlisted and a.assignment_id:
             assignment=db.get(Assignment,a.assignment_id)
             exam=db.get(Examination,assignment.exam_id)
             add_notice(db,a.candidate_id,'shortlisted:'+a.id,'You have been shortlisted',

@@ -57,7 +57,8 @@ async def work_once():
         if kind!='transcribe' and answer.body.get('followup'):
             transcript+='\nFollow-up response: '+answer.body['followup']['reply']
     try:
-        result = await asyncio.to_thread(transcribe, path) if kind == 'transcribe' else await evaluate(qbody, transcript)
+        from .round_questions import grade_mcq
+        result = await asyncio.to_thread(transcribe, path) if kind == 'transcribe' else grade_mcq(qbody,transcript) if qbody.get('source')=='bank_mcq' else await evaluate(qbody, transcript)
         with DB() as db:
             job, answer = db.get(Job, jid), db.get(Answer, aid)
             if job and answer:
