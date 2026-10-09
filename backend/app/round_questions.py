@@ -11,7 +11,11 @@ def select_questions(db, kind, level):
     categories={'aptitude','reasoning'} if kind=='aptitude' else {'technical'}
     rows=[r.body for r in db.scalars(select(PracticeQuestion)) if r.body.get('category') in categories
           and (kind!='technical' or r.body.get('subcategory')=='DSA' or r.body.get('chapter'))]
-    # Prefer the configured difficulty; fill from the bank if fewer than five exist.
+    if kind == 'technical':
+        from .technical_mcqs import questions
+        rows = questions()
+    rows = [r for r in rows if r.get('options_json') and r.get('correct_option_ids')]
+    # Prefer the configured difficulty, then fill with distinct MCQs.
     random.SystemRandom().shuffle(rows)
     rows.sort(key=lambda r:((not bool(r.get('options_json') and r.get('correct_option_ids'))) if kind=='aptitude' else False, r.get('difficulty')!=difficulty))
     chosen=[];seen=set()
@@ -19,20 +23,19 @@ def select_questions(db, kind, level):
         prompt=r['question']
         if prompt in seen:continue
         seen.add(prompt);chosen.append(r)
-        if len(chosen)==5:break
-    if len(chosen)<5:raise ValueError('The question bank needs at least five distinct questions.')
+        if len(chosen)==15:break
+    if len(chosen)<15:raise ValueError('The question bank needs at least fifteen distinct MCQs.')
     result=[]
     for r in chosen:
         options=r.get('options_json') or []
         correct=r.get('correct_option_ids') or []
         mcq=bool(options and correct)
         prompt=r['question']
-        if options:prompt+='\n\n'+'\n'.join(o['id'].upper()+'. '+o['text'] for o in options)
-        if mcq:prompt+='\nEnter the correct option letter(s), separated by commas for multiple selections.'
         expected=[','.join(sorted(correct))] if mcq else r.get('expected_points',[])
         result.append({'question':prompt,'resume_basis':r.get('chapter') or r.get('subcategory',''),
             'category':'skill','source':'bank_mcq' if mcq else 'question_bank','expected_points':expected,
-            'question_type':'verbal' if mcq else 'pseudocode','time_limit_seconds':r.get('time_limit_seconds',90)})
+            'options':options, 'multiple_select':len(correct)>1,
+            'question_type':'mcq','time_limit_seconds':r.get('time_limit_seconds',90)})
     return result
 
 def grade_mcq(question, transcript):

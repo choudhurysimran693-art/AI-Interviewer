@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 from .config import settings
 
-MODEL = 'mediapipe/efficientdet_lite0/float32/1'
+MODEL = 'grounding-dino-tiny-q8'
+MODEL_REVISION = 'ff690b0a8050566c290287545bd059350f3e9096'
 
 
 def validation_status():
@@ -13,7 +14,7 @@ def validation_status():
         data = json.loads(Path(settings.detector_validation_file).read_text())
         runs = data['runs']
         passed = (data['model'] == MODEL and data['threshold'] == 0.35 and bool(data['hardware'])
-                  and bool(data['model_revision']) and len(runs) >= 60
+                  and data['model_revision'] == MODEL_REVISION and len(runs) >= 60
                   and len({r['clip_id'] for r in runs}) == len(runs))
         for category in ['mobile phone', 'tablet computer']:
             subset = [r for r in runs if r['expected'] == category]

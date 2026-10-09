@@ -24,7 +24,7 @@ self.onmessage=async({data})=>{
       const ctx=canvas.getContext('2d')!;ctx.drawImage(frame,0,0);
       const pixels=ctx.getImageData(0,0,frame.width,frame.height);
       const image=new RawImage(new Uint8ClampedArray(pixels.data),frame.width,frame.height,4);
-      const labels=['mobile phone','tablet computer','laptop computer','monitor'];
+      const labels=['mobile phone','tablet computer','laptop computer'];
       // Batch size is fixed to one. Pass the complete processor output,
       // including pixel_mask, which the generic pipeline currently omits.
       const inputs=await detector.processor(image,labels.join('. ')+'.');
@@ -40,7 +40,7 @@ self.onmessage=async({data})=>{
       if(!probabilities.flat().every(Number.isFinite))throw new Error('Invalid model output on this graphics adapter. Monitoring cannot continue.');
       if(diagnostic)self.postMessage({type:'diagnostic',groups,maxima:groups.map(g=>Math.max(...probabilities.map((r:number[])=>Math.min(...g.positions.map((j:number)=>r[j])))))});
       const detections=groundedDetections(probabilities,outputs.pred_boxes.tolist()[0],groups,frame.width,frame.height,threshold);
-      self.postMessage({type:'result',timestamp,latency:performance.now()-start,backend,detections});
+      self.postMessage({type:'result',timestamp,latency:performance.now()-start,backend,model:'grounding-dino-tiny-q8',model_revision:'ff690b0a8050566c290287545bd059350f3e9096',detections});
     }
   }catch(error){self.postMessage({type:'error',message:String(error)});}finally{frame?.close();}
 };

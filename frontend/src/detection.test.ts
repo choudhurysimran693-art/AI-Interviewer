@@ -3,20 +3,18 @@ import {deviceDetections,DeviceTracker,IntervalTracker} from './detection';
 const phone={label:'mobile phone',score:.8,box:{xmin:1,ymin:1,xmax:20,ymax:20}};
 describe('device events',()=>{
   it('never converts face or person labels into device strikes',()=>{const tracker=new DeviceTracker();for(let now=0;now<30000;now+=1000)expect(tracker.update([{...phone,label:'person'},{...phone,label:'multiple_faces'}],now)).toEqual([]);});
-  it('confirms continued use again only after removal grace and fresh frames',()=>{
+  it('does not count a continuously visible device twice',()=>{
     const tracker=new DeviceTracker();const events=[];
     for(let now=0;now<=19000;now+=1000)events.push(...tracker.update([phone],now));
     const confirmed=events.filter(e=>e.confirmed);
-    expect(confirmed).toHaveLength(2);
-    expect(confirmed[0].id).not.toBe(confirmed[1].id);
-    expect(confirmed[1].started).toBe(17000);
+    expect(confirmed).toHaveLength(1);
   });
   it('confirms CPU scans at the actual sampling cadence but rejects stale gaps',()=>{const t=new DeviceTracker();t.setMaxGap(11000);expect(t.update([phone],0)).toEqual([]);expect(t.update([phone],5000)).toEqual([]);expect(t.update([phone],10000)[0].confirmed).toBe(true);const stale=new DeviceTracker();stale.setMaxGap(11000);stale.update([phone],0);stale.update([phone],5000);expect(stale.update([phone],20000)).toEqual([]);});
 
   it('requires consecutive frames and ignores low confidence',()=>{const t=new DeviceTracker();expect(t.update([phone],0)).toEqual([]);expect(t.update([{...phone,score:.2}],1000)).toEqual([]);expect(t.update([phone],2000)).toEqual([]);expect(t.update([phone],3000)).toEqual([]);expect(t.update([phone],4000)[0].confirmed).toBe(true);});
   it('does not confirm across long gaps',()=>{const t=new DeviceTracker();t.update([phone],0);t.update([phone],1000);expect(t.update([phone],4000)).toEqual([]);});
-  it('captures once while present and closes after absence',()=>{const t=new DeviceTracker();t.update([phone],0);t.update([phone],1000);const e=t.update([phone],2000)[0];expect(t.update([phone],3000)).toEqual([]);expect(t.update([],7000)).toEqual([]);const closed=t.update([],8000)[0];expect(closed.closed).toBe(true);expect(closed.id).toBe(e.id);});
-  it('counts a confirmed return after removal as a new occurrence',()=>{const t=new DeviceTracker();for(let n=0;n<=2000;n+=1000)t.update([phone],n);t.update([],7000);expect(t.update([phone],8000)).toEqual([]);expect(t.update([phone],9000)).toEqual([]);expect(t.update([phone],10000)[0].confirmed).toBe(true);});
+  it('captures once while present and closes after absence',()=>{const t=new DeviceTracker();t.update([phone],0);t.update([phone],1000);const e=t.update([phone],2000)[0];expect(t.update([phone],3000)).toEqual([]);expect(t.update([],7000)).toEqual([]);const closed=t.update([],12000)[0];expect(closed.closed).toBe(true);expect(closed.id).toBe(e.id);});
+  it('counts a confirmed return after removal as a new occurrence',()=>{const t=new DeviceTracker();for(let n=0;n<=2000;n+=1000)t.update([phone],n);t.update([],3000);t.update([],8000);expect(t.update([phone],9000)).toEqual([]);expect(t.update([phone],10000)).toEqual([]);expect(t.update([phone],11000)[0].confirmed).toBe(true);});
 });
 describe('face observations',()=>{it('uses continuous thresholds and merges short gaps',()=>{const t=new IntervalTracker();expect(t.update('no_face',true,0,3000)).toBeNull();expect(t.update('no_face',true,3000,3000)).toBeNull();const e=t.update('no_face',true,3334,3000);expect(e).not.toBeNull();expect(t.update('no_face',false,3500,3000)).toBeNull();expect(t.update('no_face',true,3800,3000)).toBeNull();expect(t.update('no_face',false,5000,3000)?.id).toBe(e?.id);});});
 

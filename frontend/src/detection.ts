@@ -2,32 +2,31 @@ export type Detection = {label:string;score:number;box:Record<string,number>};
 export const DEVICE_LABELS=['mobile phone','tablet computer','laptop computer'] as const;
 export function deviceDetections(detections:Detection[],threshold:number){return detections.filter(d=>DEVICE_LABELS.some(label=>label===d.label)&&Number.isFinite(d.score)&&d.score>=threshold);}
 export type DeviceEvent = {id:string;label:string;started:number;duration:number;score:number;box:Record<string,number>;confirmed:boolean;closed:boolean};
-type Track = {hits:number;lastSeen:number;started:number;event?:DeviceEvent;lastWarning:number};
+type Track = {hits:number;lastSeen:number;started:number;event?:DeviceEvent;lastWarning:number;absentSince?:number};
 export class DeviceTracker {
   constructor(private threshold=.35,private confirmFrames=3,private maxGap=2000){}
   tracks = new Map<string,Track>();
   setMaxGap(milliseconds:number){this.maxGap=milliseconds;}
   update(detections:Detection[], now:number):DeviceEvent[]{
     const events:DeviceEvent[]=[];
-    for(const label of DEVICE_LABELS){
+    // One visible-device episode, even if the model alternates phone/tablet labels.
+    for(const label of ['device']){
       let track=this.tracks.get(label);
       if(!track){track={hits:0,lastSeen:-Infinity,started:now,lastWarning:-Infinity};this.tracks.set(label,track);}
-      const found=detections.filter(d=>d.label===label&&d.score>=this.threshold).sort((a,b)=>b.score-a.score)[0];
+      const found=deviceDetections(detections,this.threshold).sort((a,b)=>b.score-a.score)[0];
       if(found){
-        // Give the candidate time to remove the device, then require a fresh
-        // run of confirming frames if it remains visible after the warning.
-        if(track.event&&now-track.lastWarning>=15000){
-          events.push({...track.event,duration:(track.lastSeen-track.event.started)/1000,confirmed:false,closed:true});
-          track.event=undefined;track.hits=0;track.started=now;
-        }
+        track.absentSince=undefined;
         if(now-track.lastSeen>this.maxGap){track.hits=0;track.started=now;}
         track.hits++;track.lastSeen=now;
         if(!track.event&&track.hits>=this.confirmFrames&&now-track.lastWarning>=15000){
-          track.event={id:crypto.randomUUID(),label,started:track.started,duration:0,score:found.score,box:found.box,confirmed:true,closed:false};
+          track.event={id:crypto.randomUUID(),label:found.label,started:track.started,duration:0,score:found.score,box:found.box,confirmed:true,closed:false};
           track.lastWarning=now;events.push({...track.event});
         }
-      }else if(track.event&&now-track.lastSeen>=5000){
-        events.push({...track.event,duration:(track.lastSeen-track.event.started)/1000,confirmed:false,closed:true});track.event=undefined;track.hits=0;track.lastWarning=-Infinity;
+      }else if(track.event){
+        track.absentSince??=now;
+        if(now-track.absentSince>=5000){
+          events.push({...track.event,duration:(track.lastSeen-track.event.started)/1000,confirmed:false,closed:true});track.event=undefined;track.hits=0;track.lastWarning=-Infinity;
+        }
       }else if(!track.event){track.hits=0;}
     }
     return events;

@@ -1,5 +1,7 @@
 # HR interviews with device detection disabled
 
+**Superseded:** the current behavior restores device warnings for human review. See round-controls-release.md. The following describes the previous release only.
+
 Production detector validation now controls only device detection and its penalties, rather than access to all assigned interviews. Without passing validation, the browser does not start the device worker, the server accepts heartbeats without object inference, and device events/warnings are rejected. Camera, microphone, face, focus, fullscreen, consent, authorization and evidence-storage requirements remain.
 
 This does not fix tablet classification or certify the model. Existing historical events and terminations remain unchanged. Development retains its existing detector validation bypass.

@@ -28,12 +28,18 @@ def test_template_walkthrough_and_manual_final(client):
         c=response.json();headers={'Authorization':'Bearer '+c['token']};start(client,c,headers)
         response=client.post('/api/sessions/'+c['id']+'/questions',headers=headers)
         assert response.status_code==200,response.text
-        questions=response.json()['questions'];assert len(questions)==5
+        questions=response.json()['questions'];assert len(questions)==(15 if index in (1,2) else 5)
         assert all('expected_points' not in q for q in questions)
         if index==1:assert all(q['source']=='bank_mcq' for q in questions)
         with DB() as db:
-            for q in questions:db.add(Answer(session_id=c['id'],body={'approved':True,'evaluation':{'status':'scored','technical':80,'communication':80}}))
+            for q in questions[:5]:db.add(Answer(session_id=c['id'],body={'question_id':q['id'],'approved':True,'evaluation':{'status':'scored','technical':80,'communication':80}}))
             db.commit()
+        if len(questions)==15:
+            assert client.post('/api/sessions/'+c['id']+'/complete',headers=headers).status_code==409
+            assert all(q.get('options') and 'correct_option_ids' not in q for q in questions)
+            with DB() as db:
+                for q in questions[5:]:db.add(Answer(session_id=c['id'],body={'question_id':q['id'],'approved':True,'evaluation':{'status':'scored','technical':80,'communication':80}}))
+                db.commit()
         assert client.post('/api/sessions/'+c['id']+'/complete',headers=headers).status_code==200
         response=hr.patch(f"/api/application-rounds/{r['id']}/decision",json={'status':'passed','hr_notes':'Reviewed'})
         assert response.status_code==200,response.text
@@ -73,7 +79,7 @@ def test_customization_and_template_permissions(client):
         assert db.scalar(select(func.count()).select_from(RoundTemplate))==1
 
 def test_threshold_and_key_scoring(client):
-    from app.db import Session
+    from app.db import Session, Question
     from app.rounds import complete_session
     hr,pid,aid=setup(client)
     rows=hr.get(f'/api/hr/applications/{aid}/rounds').json();rid=rows[1]['id']
@@ -86,7 +92,9 @@ def test_threshold_and_key_scoring(client):
         exam=db.get(Examination,db.get(Assignment,r.assignment_id).exam_id)
         s=Session(token_hash='test',mode='hr',status='complete',expires=time.time()+100,body={'application_round_id':r.id,'hr_id':exam.hr_id,'summary':{'overall':80}})
         db.add(s);db.flush();r.interview_session_id=s.id;r.status='in_progress'
-        for i in range(5):db.add(Answer(session_id=s.id,body={'evaluation':{'status':'scored'}}))
+        for i in range(15):
+            q=Question(session_id=s.id,body={'sequence':i+1});db.add(q);db.flush()
+            db.add(Answer(session_id=s.id,body={'question_id':q.id,'evaluation':{'status':'scored'}}))
         db.flush();complete_session(db,s);db.commit()
         assert r.status=='passed'
     assert hr.get(f'/api/hr/applications/{aid}/rounds').json()[2]['status']=='invited'

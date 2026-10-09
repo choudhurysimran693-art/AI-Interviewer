@@ -20,10 +20,10 @@ const native=require.resolve('esbuild');
 require.cache[native]={id:native,filename:native,loaded:true,exports:esbuild};
 const command=process.argv[2]||'build';
 const {default:react}=await import('@vitejs/plugin-react');
-const config={configFile:false,plugins:[react()],worker:{format:'es'},build:{chunkSizeWarningLimit:2500},server:{host:'127.0.0.1',proxy:{'/api':'http://127.0.0.1:8000'}}};
+const config={configFile:false,plugins:[react()],worker:{format:'es'},build:{chunkSizeWarningLimit:2500,rollupOptions:{input:{main:'index.html',detector:'detector-check.html'}}},server:{host:'127.0.0.1',proxy:{'/api':'http://127.0.0.1:8000'}}};
 if(command==='test'){
   const {startVitest}=await import('vitest/node');
-  const ctx=await startVitest('test',['src/detection.test.ts','src/routes.test.ts','src/fullscreen.test.ts','src/gaze.test.ts','src/Applications.test.tsx'],{watch:false,pool:'threads',maxWorkers:1,minWorkers:1},config);
+  const ctx=await startVitest('test',['src/detection.test.ts','src/groundedDetections.test.ts','src/routes.test.ts','src/fullscreen.test.ts','src/gaze.test.ts','src/Applications.test.tsx'],{watch:false,pool:'threads',maxWorkers:1,minWorkers:1},config);
   await ctx?.close();
 }else{
   const {build,createServer}=await import('vite');

@@ -1,9 +1,9 @@
 export type Mode = 'practice' | 'hr';
 export type Profile = {skills:string[]; projects:string[]; responsibilities:string[]; experience:string};
-export type Question = {id:string; question:string; resume_basis:string; category:string; sequence:number; source:string; question_type?:string; starter_code?:string; language?:string; time_limit_seconds?:number};
+export type Question = {options?:{id:string;text:string}[];multiple_select?:boolean;id:string; question:string; resume_basis:string; category:string; sequence:number; source:string; question_type?:string; starter_code?:string; language?:string; time_limit_seconds?:number};
 export type Evaluation = {status:string; technical?:number; communication?:number; reason?:string; strengths?:string[]; improvements?:string[]; missing_concepts?:string[]; evidence?:string[]};
 export type Answer = {id:string; question_id:string; transcript:string; approved:boolean; evaluation:Evaluation; duration:number; metrics:Record<string,number|null>; ai_evaluation?:Evaluation; followup?:{question:string;reply:string}; human_reviews?:{reviewer:string;reviewed_at:number;technical:number;communication:number;reason:string}[]};
-export type SessionState = {id:string; mode:Mode; status:string; role:string; name:string; questions:Question[]; answers:Answer[]; jobs:{id:string;kind:string;status:string;answer_id:string}[]};
+export type SessionState = {round_type?:string;id:string; mode:Mode; status:string; role:string; name:string; questions:Question[]; answers:Answer[]; jobs:{id:string;kind:string;status:string;answer_id:string}[]};
 export type Credentials = {id:string;token:string};
 export type FeelingValue = {label:string; intensity:number|null};
 export type FeelingsResponse = {question_id:string;feelings:FeelingValue[];note:string};

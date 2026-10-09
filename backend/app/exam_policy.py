@@ -55,12 +55,24 @@ def signal_warning(db,s,event_id,signal='device'):
     return action
 
 
-def device_warning(db,s,event_id):
+def device_warning(db,s,event_id,warning_only=False):
+    if warning_only:
+        if s.mode!='hr' or not s.body.get('exam_started_at') or s.status in ('complete','terminated'):
+            return 'informational'
+        state=dict(s.body.get('security',{}))
+        ids=list(state.get('device_warning_events',[]))
+        if event_id in ids:return 'device_warning_recorded'
+        ids.append(event_id)
+        state.update(device_warning_events=ids,device_warning_count=len(ids),review_required=True)
+        s.body=s.body|{'security':state,'device_warning_count':len(ids)}
+        system_event(db,s,'device_warning',source_event=event_id,warning_only=True)
+        notify(db,s,event_id,'Possible device detected — human review required','medium')
+        return 'device_warning'
     return signal_warning(db,s,event_id,'device')
 
 
 def apply_policy(db,s,event_id,body,config,is_new):
-    if body['type']=='device':return device_warning(db,s,event_id)
+    if body['type']=='device':return device_warning(db,s,event_id,warning_only=config.get('device_warning_only',False))
     if s.mode!='hr' or not s.body.get('exam_started_at'): return 'recorded'
     state=dict(s.body.get('security',{}));kind=body['type'];action='warning'
     if kind=='screen_returned':

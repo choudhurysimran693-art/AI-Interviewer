@@ -150,10 +150,11 @@ def complete_session(db,s):
     a=db.get(Application,r.application_id);a.updated_at=time.time()
     d=db.get(InterviewRound,r.round_id)
     if (d.settings or {}).get('decision_mode')=='threshold' and r.score is not None:
-        from .db import Answer
+        from .db import Answer, Question
         answers=list(db.scalars(select(Answer).where(Answer.session_id==s.id)))
         # Missing/unavailable scores always require review, never automatic rejection.
-        if len(answers)==5 and all(x.body.get('evaluation',{}).get('status')=='scored' for x in answers):
+        question_ids=set(db.scalars(select(Question.id).where(Question.session_id==s.id)))
+        if question_ids and len(answers)==len(question_ids) and {x.body.get('question_id') for x in answers}==question_ids and all(x.body.get('evaluation',{}).get('status')=='scored' for x in answers):
             user=db.get(User,s.body['hr_id'])
             status='passed' if r.score>=d.settings.get('pass_threshold',70) else 'failed'
             apply_decision(db,r,a,user,DecisionInput(status=status,hr_notes='Configured aptitude threshold applied.'))

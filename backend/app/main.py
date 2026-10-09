@@ -340,7 +340,7 @@ def session_state(sid: str, authorization: str = Header(''), db=Depends(database
     s = active_session(sid, db, authorization, False)
     questions = sorted(db.scalars(select(Question).where(Question.session_id == sid)).all(), key=lambda q: q.body['sequence'])
     answers = db.scalars(select(Answer).where(Answer.session_id == sid)).all()
-    return {'id': sid, 'mode': s.mode, 'status': s.status, 'role': s.body['role'], 'name': s.body['name'],
+    return {'id': sid, 'mode': s.mode, 'round_type': s.body.get('round_type'), 'status': s.status, 'role': s.body['role'], 'name': s.body['name'],
             'questions': [{'id': q.id, **{k: v for k, v in q.body.items() if k != 'expected_points'}} for q in questions],
             'answers': [{'id': a.id, **a.body} for a in answers],
             'jobs': [{'id': j.id, **{k: v for k, v in j.body.items() if k != 'path'}} for j in db.scalars(select(Job).where(Job.session_id == sid))]}
@@ -362,7 +362,7 @@ async def questions(sid: str, authorization: str = Header(''), db=Depends(databa
     existing = db.scalars(select(Question).where(Question.session_id == sid)).all()
     if not existing:
         from .round_questions import select_questions
-        rows = select_questions(db,s.body.get('round_type'),s.body['level']) if s.body.get('evaluation_mode')=='ai_scored' else None
+        rows = select_questions(db,s.body.get('round_type'),s.body['level'])
         if rows is None:rows = await generate_questions(s.body['profile'], s.body['role'], s.body['level'], s.body.get('round_type'))
         # Deterministic primary keys protect concurrent retries.
         for i, q in enumerate(rows):
@@ -376,8 +376,9 @@ def heartbeat(sid: str, data: Heartbeat, authorization: str = Header(''), db=Dep
     s = active_session(sid, db, authorization)
     config = s.body.get('proctor_config') or load_config(settings.proctor_config_file)
     device_budget=config.get('device_result_max_age_ms',30000)
-    device_enabled = validation_status()['passed']
-    healthy = (data.camera and data.microphone and data.face_age_ms < 5000 and data.evidence_ready
+    device_enabled = True
+    microphone_required = s.body.get('round_type') not in ('aptitude','technical')
+    healthy = (data.camera and (data.microphone or not microphone_required) and data.face_age_ms < 5000 and data.evidence_ready
                and (not device_enabled or data.object_age_ms < device_budget and data.object_latency_ms <= device_budget)
                and (s.mode != 'hr' or data.page_visible and data.fullscreen and bool(s.body.get('storage_verified'))))
     prior = s.body.get('monitoring', {})
@@ -396,7 +397,8 @@ def monitoring_summary(sid: str, authorization: str = Header(''), db=Depends(dat
     release_lock(db,s)
     config = s.body.get('proctor_config') or load_config(settings.proctor_config_file)
     rows = [{'id':o.id, **o.body} for o in db.scalars(select(Observation).where(Observation.session_id == sid))]
-    config = {**config, 'device_detection_enabled': bool(validation_status()['passed'])}
+    config = {**config, 'device_detection_enabled': True, 'device_warning_only': not validation_status()['passed'],
+              'microphone_required': s.body.get('round_type') not in ('aptitude','technical')}
     return {'config':config, 'summary':s.body.get('proctor_summary') or summarize(rows,config), 'events':[r for r in rows if r['type']!='gaze_sample'],
             'status':s.status, 'created':s.created, 'health':s.body.get('monitoring', {}),'security':s.body.get('security',{}),'server_now':time.time()}
 
@@ -512,8 +514,6 @@ def feelings(aid: str, data: FeelingsInput, authorization: str = Header(''), db=
 @app.post('/api/sessions/{sid}/observations')
 def observation(sid: str, data: ObservationInput, authorization: str = Header(''), db=Depends(database)):
     s = active_session(sid, db, authorization)
-    if data.type == 'device' and not validation_status()['passed']:
-        raise HTTPException(409, 'Device detection is disabled pending validation; no device penalty was recorded.')
     s = db.scalar(select(Session).where(Session.id==sid).with_for_update())
     config = s.body.get('proctor_config') or load_config(settings.proctor_config_file)
     if data.type == 'device' and data.label not in {'mobile phone','tablet computer','laptop computer','smartwatch','headphones','second monitor'}:
@@ -527,6 +527,7 @@ def observation(sid: str, data: ObservationInput, authorization: str = Header(''
     oid = f'{sid}-{data.id}'
     prior = db.get(Observation, oid)
     body = describe(data.model_dump(), s.created) | {'received_at':time.time(), 'limitation': 'Client-reported observations require human review and do not establish cheating.'}
+    config = {**config, 'device_warning_only': not validation_status()['passed']}
     if prior:
         body = prior.body | {'duration': max(prior.body['duration'], data.duration)}
     db.merge(Observation(id=oid, session_id=sid, body=body))
@@ -608,13 +609,11 @@ def acknowledge_device_warning(sid:str,authorization:str=Header(''),db=Depends(d
 @app.post('/api/interview-sessions/{sid}/device-warning')
 def record_device_warning(sid:str,data:dict,authorization:str=Header(''),db=Depends(database)):
     s=active_session(sid,db,authorization)
-    if not validation_status()['passed']:
-        raise HTTPException(409, 'Device warnings are disabled pending validation.')
     s=db.scalar(select(Session).where(Session.id==sid).with_for_update())
     oid=f"{sid}-{data.get('event_id','')}"
     event=db.get(Observation,oid)
     if not event or event.session_id!=sid or event.body.get('type')!='device':raise HTTPException(422,'A confirmed device event is required.')
-    device_warning(db,s,oid);db.commit()
+    device_warning(db,s,oid,warning_only=not validation_status()['passed']);db.commit()
     return {'status':s.status,'security':s.body.get('security',{}),'device_warning_count':s.body.get('device_warning_count',0)}
 
 
@@ -689,8 +688,9 @@ def complete(sid: str, authorization: str = Header(''), db=Depends(database)):
     if s.status != 'complete':
         monitored(s)
         answers = db.scalars(select(Answer).where(Answer.session_id == sid)).all()
-        if len(answers) != 5 or any(not a.body['approved'] or a.body['evaluation']['status'] == 'pending' for a in answers):
-            raise HTTPException(409, 'Five approved answers with finished evaluation attempts are required.')
+        question_ids = set(db.scalars(select(Question.id).where(Question.session_id == sid)))
+        if not question_ids or len(answers) != len(question_ids) or {a.body.get('question_id') for a in answers} != question_ids or any(not a.body['approved'] or a.body['evaluation']['status'] == 'pending' for a in answers):
+            raise HTTPException(409, 'Every question requires an approved answer with a finished evaluation attempt.')
         for o in db.scalars(select(Observation).where(Observation.session_id == sid)):
             if o.body['type'] == 'device' and s.mode == 'hr':
                 snap = db.get(Snapshot, o.id)
