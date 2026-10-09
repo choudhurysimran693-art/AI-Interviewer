@@ -219,8 +219,6 @@ def monitored(s, starting=False):
     if s.body.get('security',{}).get('lock_until',0) and s.body['security']['lock_until']>time.time():
         raise HTTPException(423,'Examination temporarily locked. Wait for the server countdown to end.')
     if s.mode == 'hr':
-        if not validation_status()['passed']:
-            raise HTTPException(409, 'HR screening awaits device validation.')
         health = s.body.get('monitoring', {})
         if not health.get('healthy') or time.time()-health.get('received', 0) > 5:
             raise HTTPException(409, 'Working camera and device monitoring are required.')
@@ -312,8 +310,6 @@ def create_session(data: SessionInput, db=Depends(database)):
         data.role=exam.body['role'];data.level=exam.body['level']
     if not data.processing_consent or data.mode == 'hr' and not data.evidence_consent:
         raise HTTPException(422, 'Required processing consent was not provided.')
-    if data.mode == 'hr' and not validation_status()['passed']:
-        raise HTTPException(409, 'HR screening is locked until device validation passes.')
     sid=uid();token = session_token(sid)
     profile = data.profile.model_dump()
     profile = {k: [sanitize(x, data.name) for x in v] if isinstance(v, list) else sanitize(v, data.name) for k, v in profile.items()}
@@ -380,9 +376,10 @@ def heartbeat(sid: str, data: Heartbeat, authorization: str = Header(''), db=Dep
     s = active_session(sid, db, authorization)
     config = s.body.get('proctor_config') or load_config(settings.proctor_config_file)
     device_budget=config.get('device_result_max_age_ms',30000)
-    healthy = (data.camera and data.microphone and data.face_age_ms < 5000 and data.object_age_ms < device_budget and data.evidence_ready
-               and data.object_latency_ms <= device_budget
-               and (s.mode != 'hr' or data.page_visible and data.fullscreen and bool(s.body.get('storage_verified')) and validation_status()['passed']))
+    device_enabled = validation_status()['passed']
+    healthy = (data.camera and data.microphone and data.face_age_ms < 5000 and data.evidence_ready
+               and (not device_enabled or data.object_age_ms < device_budget and data.object_latency_ms <= device_budget)
+               and (s.mode != 'hr' or data.page_visible and data.fullscreen and bool(s.body.get('storage_verified'))))
     prior = s.body.get('monitoring', {})
     if s.mode == 'hr' and (not healthy or prior and time.time()-prior.get('received', 0) > 5) and prior.get('healthy'):
         db.add(Observation(session_id=sid, body={'type': 'tracking_unavailable', 'timestamp': time.time()-s.created,
@@ -399,6 +396,7 @@ def monitoring_summary(sid: str, authorization: str = Header(''), db=Depends(dat
     release_lock(db,s)
     config = s.body.get('proctor_config') or load_config(settings.proctor_config_file)
     rows = [{'id':o.id, **o.body} for o in db.scalars(select(Observation).where(Observation.session_id == sid))]
+    config = {**config, 'device_detection_enabled': bool(validation_status()['passed'])}
     return {'config':config, 'summary':s.body.get('proctor_summary') or summarize(rows,config), 'events':[r for r in rows if r['type']!='gaze_sample'],
             'status':s.status, 'created':s.created, 'health':s.body.get('monitoring', {}),'security':s.body.get('security',{}),'server_now':time.time()}
 
@@ -514,6 +512,8 @@ def feelings(aid: str, data: FeelingsInput, authorization: str = Header(''), db=
 @app.post('/api/sessions/{sid}/observations')
 def observation(sid: str, data: ObservationInput, authorization: str = Header(''), db=Depends(database)):
     s = active_session(sid, db, authorization)
+    if data.type == 'device' and not validation_status()['passed']:
+        raise HTTPException(409, 'Device detection is disabled pending validation; no device penalty was recorded.')
     s = db.scalar(select(Session).where(Session.id==sid).with_for_update())
     config = s.body.get('proctor_config') or load_config(settings.proctor_config_file)
     if data.type == 'device' and data.label not in {'mobile phone','tablet computer','laptop computer','smartwatch','headphones','second monitor'}:
@@ -608,6 +608,8 @@ def acknowledge_device_warning(sid:str,authorization:str=Header(''),db=Depends(d
 @app.post('/api/interview-sessions/{sid}/device-warning')
 def record_device_warning(sid:str,data:dict,authorization:str=Header(''),db=Depends(database)):
     s=active_session(sid,db,authorization)
+    if not validation_status()['passed']:
+        raise HTTPException(409, 'Device warnings are disabled pending validation.')
     s=db.scalar(select(Session).where(Session.id==sid).with_for_update())
     oid=f"{sid}-{data.get('event_id','')}"
     event=db.get(Observation,oid)

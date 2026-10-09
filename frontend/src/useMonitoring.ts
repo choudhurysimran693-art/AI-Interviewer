@@ -19,6 +19,7 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
     if(!hr){setStatus('Practice does not collect proctoring signals.');return;}
     stopRef.current();const run=++generation.current;
     if(!config){setStatus('Wait for monitoring configuration to load.');return;}
+    const deviceEnabled=config.device_detection_enabled!==false;
     setStatus('Requesting camera and microphone…');setFace('Loading face detector…');setDeviceStatus('Loading object detector…');
     let media:MediaStream|undefined;
     try{
@@ -29,7 +30,8 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
       let lastFace=0,lastObject=0,objectLatency=999999,visibleFaces:number|null=null,faceCount=0,objectCount=0,lastSubmit=0,lastHeartbeat=0,lastGaze=0,awayStarted=0,faceError='',objectError='';
       const started=performance.now(),baseTime=Date.now()/1000;
       const faceWorker=new Worker('/face-monitor.js');
-      const objectWorker=new Worker('/device-monitor.js');
+      const objectWorker=deviceEnabled?new Worker('/device-monitor.js'):null;
+      if(!deviceEnabled)setDeviceStatus('Device detection disabled pending validation');
       const intervals=new IntervalTracker(),tracker=new DeviceTracker(config.device_confidence,config.device_confirm_frames,config.device_max_gap_ms);
       const deviceBudget=config.device_result_max_age_ms??30000;
       const gazeWindow=new GazeWindow(config.gaze_window_seconds??30,config.gaze_away_seconds??5);
@@ -73,7 +75,7 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
           }
         }
       };
-      objectWorker.onmessage=async({data})=>{
+      if(objectWorker)objectWorker.onmessage=async({data})=>{
         if(disposed)return;
         if(data.type==='ready'){objectReady=true;setDeviceStatus('Ready; waiting for first inference');}
         if(data.type==='progress')setDeviceStatus(`Loading local model${typeof data.progress?.progress==='number'?` ${Math.round(data.progress.progress)}%`: '…'}`);
@@ -104,11 +106,11 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
         }
       };
       faceWorker.onerror=(event)=>{faceReady=false;faceBusy=false;faceError=event.message||'Worker failed';setFace('Face detector unavailable');reportFailure('Face detector',faceError);};
-      objectWorker.onerror=()=>{objectReady=false;objectError='Worker failed';setDeviceStatus('Object detection unavailable');reportFailure('Object detector',objectError);};
+      if(objectWorker)objectWorker.onerror=()=>{objectReady=false;objectError='Worker failed';setDeviceStatus('Object detection unavailable');reportFailure('Object detector',objectError);};
       let timer=0;
-      stopRef.current=()=>{if(disposed)return;disposed=true;acknowledged.current=0;++generation.current;clearInterval(timer);listeners.forEach(remove=>remove());faceWorker.terminate();objectWorker.terminate();live.getTracks().forEach(t=>t.stop());if(audio.state!=='closed')void audio.close().catch(()=>{});if(video.current)video.current.srcObject=null;setStream(null);setHealthy(false);setMicActive(false);setAudioLevel(0);setStatus('Camera and microphone off');setFace('Face detection unavailable');setDeviceStatus('Detector off');if(hr)void api(`/sessions/${credentials.id}/monitoring/heartbeat`,json('POST',{camera:false,microphone:false,page_visible:false,fullscreen:false,face_age_ms:999999,object_age_ms:999999,evidence_ready:false,...coverage()}),credentials.token).catch(()=>{});};
+      stopRef.current=()=>{if(disposed)return;disposed=true;acknowledged.current=0;++generation.current;clearInterval(timer);listeners.forEach(remove=>remove());faceWorker.terminate();objectWorker?.terminate();live.getTracks().forEach(t=>t.stop());if(audio.state!=='closed')void audio.close().catch(()=>{});if(video.current)video.current.srcObject=null;setStream(null);setHealthy(false);setMicActive(false);setAudioLevel(0);setStatus('Camera and microphone off');setFace('Face detection unavailable');setDeviceStatus('Detector off');if(hr)void api(`/sessions/${credentials.id}/monitoring/heartbeat`,json('POST',{camera:false,microphone:false,page_visible:false,fullscreen:false,face_age_ms:999999,object_age_ms:999999,evidence_ready:false,...coverage()}),credentials.token).catch(()=>{});};
       if(video.current){video.current.srcObject=live;await video.current.play();}
-      faceWorker.postMessage({type:'init'});objectWorker.postMessage({type:'init',threshold:config.device_confidence});
+      faceWorker.postMessage({type:'init'});objectWorker?.postMessage({type:'init',threshold:config.device_confidence});
       if(hr){try{await api(`/sessions/${credentials.id}/monitoring/storage-check`,json('POST'),credentials.token);evidenceReady=true;}catch{setStatus('Evidence storage unavailable. Retry monitoring.');}}
       timer=window.setInterval(async()=>{
         if(disposed)return;
@@ -118,17 +120,17 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
         setMicActive(microphone);analyser.getFloatTimeDomainData(samples);
         const rms=Math.sqrt(samples.reduce((n,x)=>n+x*x,0)/samples.length);setAudioLevel(Math.min(1,rms*5));
         recordInterval('background_noise',microphone&&rms>.2&&!['answer','answer_done'].includes(current.current.stage),now,5000);
-        const detectors=faceReady&&objectReady&&objectFast&&lastFace>0&&lastObject>0&&now-lastFace<5000&&now-lastObject<deviceBudget;
+        const detectors=faceReady&&lastFace>0&&now-lastFace<5000&&(!deviceEnabled||objectReady&&objectFast&&lastObject>0&&now-lastObject<deviceBudget);
         setSelfCheck(camera&&microphone&&detectors&&evidenceReady);
-        if(now-started>60000){if(!faceReady&&!faceError){faceError='Startup timed out';reportFailure('Face detector',faceError);}if(!objectReady&&!objectError){objectError='Startup timed out';reportFailure('Device detector',objectError);}}
+        if(now-started>60000){if(!faceReady&&!faceError){faceError='Startup timed out';reportFailure('Face detector',faceError);}if(deviceEnabled&&!objectReady&&!objectError){objectError='Startup timed out';reportFailure('Device detector',objectError);}}
         if(faceError||objectError)setStatus(`Face detection: ${faceError?'unavailable':lastFace?'active':'starting'}. Device detection: ${objectError?'unavailable':lastObject?'active':'starting'}. Retry monitoring to complete the equipment check.`);
         const focused=!document.hidden&&document.hasFocus();
         const ok=camera&&microphone&&detectors&&evidenceReady&&(!hr||focused&&!!fullscreenElement());
         if(!ok)acknowledged.current=0;setHealthy(ok);
-        if(!faceError&&!objectError&&camera&&microphone)setStatus(ok?'Camera, microphone and detectors active':!faceReady||!objectReady?'Loading local detection models…':!lastObject?'Running first object inference…':'Monitoring is not ready. Keep this window active and wait for fresh detector results.');
+        if(!faceError&&!objectError&&camera&&microphone)setStatus(!deviceEnabled?(ok?'Camera, microphone and face checks active. Device detection disabled.':'Complete the face check and keep this window active. Device detection disabled.'):ok?'Camera, microphone and detectors active':!faceReady||!objectReady?'Loading local detection models…':!lastObject?'Running first object inference…':'Monitoring is not ready. Keep this window active and wait for fresh detector results.');
         if(v&&v.readyState>=2&&camera&&!document.hidden){
           if(faceReady&&!faceBusy){faceBusy=true;try{const frame=await createImageBitmap(v);if(!disposed)faceWorker.postMessage({type:'frame',frame,timestamp:now},[frame]);else frame.close();}catch{faceBusy=false;}}
-          if(objectReady&&!objectBusy&&now-lastSubmit>=1000){
+          if(objectWorker&&objectReady&&!objectBusy&&now-lastSubmit>=1000){
             objectBusy=true;lastSubmit=now;matchingContext={...current.current};
             matchingFrame=document.createElement('canvas');matchingFrame.width=v.videoWidth;matchingFrame.height=v.videoHeight;matchingFrame.getContext('2d')!.drawImage(v,0,0);
             try{const frame=await createImageBitmap(matchingFrame);if(!disposed)objectWorker.postMessage({type:'frame',frame,timestamp:now},[frame]);else frame.close();}catch{objectBusy=false;}
