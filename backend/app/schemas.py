@@ -84,7 +84,8 @@ class FeelingsInput(BaseModel):
 
 class MCQSubmission(BaseModel):
     question_id: str = Field(min_length=1,max_length=100)
-    selected: list[str] = Field(min_length=1,max_length=20)
+    selected: list[str] = Field(max_length=20)
+    timed_out: bool = False
     duration: float = Field(default=0,ge=0)
 
 

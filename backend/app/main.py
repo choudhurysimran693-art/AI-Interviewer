@@ -483,9 +483,10 @@ def submit_mcq(sid:str, data:MCQSubmission, authorization:str=Header(''), db=Dep
     if not q or q.session_id!=sid:raise HTTPException(404,'Question not found.')
     options={o['id'] for o in q.body.get('options',[])}
     chosen=set(data.selected)
-    if q.body.get('source')!='bank_mcq' or not options or not chosen<=options or (not q.body.get('multiple_select') and len(chosen)!=1):
+    if q.body.get('source')!='bank_mcq' or not options or not chosen<=options or (not chosen and not data.timed_out) or (chosen and not q.body.get('multiple_select') and len(chosen)!=1):
         raise HTTPException(422,'Choose a valid option for this question.')
     if data.duration>q.body.get('time_limit_seconds',90)+1:raise HTTPException(422,'Answer duration exceeds the question limit.')
+    if data.timed_out and data.duration<q.body.get('time_limit_seconds',90):raise HTTPException(422,'Question time has not elapsed.')
     aid=q.id+'-answer'
     prior=db.get(Answer,aid)
     if prior and prior.body.get('approved') and prior.body.get('evaluation',{}).get('status')=='scored':
@@ -496,7 +497,7 @@ def submit_mcq(sid:str, data:MCQSubmission, authorization:str=Header(''), db=Dep
         raise HTTPException(409,'Finish the previous question first.')
     transcript=','.join(sorted(chosen))
     body={'question_id':q.id,'transcript':transcript,'duration':data.duration,'approved':True,
-          'version':(prior.body.get('version',0) if prior else 0)+1,'metrics':{},'input':'mcq',
+          'version':(prior.body.get('version',0) if prior else 0)+1,'metrics':{},'input':'mcq','timed_out':data.timed_out,
           'evaluation':grade_mcq(q.body,transcript)}
     if prior:prior.body=body
     else:db.add(Answer(id=aid,session_id=sid,body=body))
@@ -607,15 +608,19 @@ async def gaze_stream(ws:WebSocket,sid:str):
             messages+=1
             if messages>45:await ws.close(code=1008);return
             if data.type not in ['gaze_sample','gaze_violation']:await ws.close(code=1008);return
-            with DB() as db:
-                login=db.get(LoginSession,login_id);user=db.get(User,login.user_id) if login else None
-                if not login or login.expires<=time.time() or not user or blocked(user):await ws.close(code=1008);return
-                reset=actor.set(user)
-                try:
-                    session=active_session(sid,db,'Bearer '+str(hello.get('token','')))
-                    if session.mode!='hr' or not session.body.get('exam_started_at'):await ws.close(code=1008);return
-                    result=observation(sid,data,'Bearer '+str(hello.get('token','')),db)
-                finally:actor.reset(reset)
+            def process_gaze():
+                with DB() as db:
+                    login=db.get(LoginSession,login_id);user=db.get(User,login.user_id) if login else None
+                    if not login or login.expires<=time.time() or not user or blocked(user):raise HTTPException(403,'Session unavailable.')
+                    reset=actor.set(user)
+                    try:
+                        session=active_session(sid,db,'Bearer '+str(hello.get('token','')))
+                        if session.mode!='hr' or not session.body.get('exam_started_at'):raise HTTPException(403,'Interview not started.')
+                        result=observation(sid,data,'Bearer '+str(hello.get('token','')),db)
+                    finally:actor.reset(reset)
+                return result
+            from starlette.concurrency import run_in_threadpool
+            result=await run_in_threadpool(process_gaze)
             await ws.send_json(result)
     except (WebSocketDisconnect,asyncio.TimeoutError,ValueError,HTTPException):
         try:await ws.close(code=1008)

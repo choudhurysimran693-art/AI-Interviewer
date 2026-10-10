@@ -38,3 +38,20 @@ def test_repeated_bank_seed_is_one_read_without_updates(client):
     finally:event.remove(engine,'before_cursor_execute',record)
     assert len([s for s in statements if s.lstrip().upper().startswith('SELECT')])==1
     assert not any(s.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for s in statements)
+
+
+def test_timeout_saves_unanswered_once_and_allows_next(client):
+    c,h,_,_=assigned(client)
+    with DB() as db:
+        s=db.get(Session,c['id']);s.body=s.body|{'round_type':'aptitude'};db.commit()
+    start(client,c,h);base='/api/sessions/'+c['id']
+    qs=client.post(base+'/questions',headers=h).json()['questions']
+    q=qs[0];body={'question_id':q['id'],'selected':[],'timed_out':True,'duration':q['time_limit_seconds']}
+    assert client.post(base+'/mcq',headers=h,json={**body,'duration':0}).status_code==422
+    assert client.post(base+'/mcq',headers=h,json={**body,'timed_out':False}).status_code==422
+    r=client.post(base+'/mcq',headers=h,json=body)
+    assert r.status_code==200,r.text
+    assert r.json()['evaluation']['technical']==0
+    assert client.post(base+'/mcq',headers=h,json=body).json()==r.json()
+    q=qs[1]
+    assert client.post(base+'/mcq',headers=h,json={'question_id':q['id'],'selected':[q['options'][0]['id']]}).status_code==200
