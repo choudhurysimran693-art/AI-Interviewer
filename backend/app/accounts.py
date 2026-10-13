@@ -1,3 +1,4 @@
+from .email_delivery import configured as email_configured
 import hashlib
 import hmac
 import secrets
@@ -54,18 +55,15 @@ def public(user):
     return result
 
 def send_recovery_email(user, token):
-    if not settings.smtp_host or not settings.smtp_from:
-        return False
+    from .email_delivery import configured, send_message
+    if not configured():return False
     link=f'{settings.public_url.rstrip("/")}/?reset={token}'
     message=EmailMessage()
     message['Subject']='Reset your AI Interviewer password'
-    message['From']=settings.smtp_from
+    message['From']=settings.email_from if settings.email_provider=='brevo' else settings.smtp_from
     message['To']=user.email
     message.set_content(f'''Hello {user.name},\n\nUse this link to reset your AI Interviewer password:\n{link}\n\nThis link expires in 30 minutes and can only be used once. If you did not request this, you can ignore this email.\n''')
-    with smtplib.SMTP(settings.smtp_host,settings.smtp_port,timeout=10) as smtp:
-        if settings.smtp_use_tls:smtp.starttls()
-        if settings.smtp_user:smtp.login(settings.smtp_user,settings.smtp_password)
-        smtp.send_message(message)
+    send_message(message)
     return True
 
 class RegisterInput(BaseModel):
@@ -153,7 +151,7 @@ def forgot(data:ForgotInput):
             pending=db.scalars(select(Recovery).where(Recovery.user_id==user.id)).all()
             if not any(r.body.get('requested_at',0)>time.time()-3600 for r in pending):
                 token=secrets.token_urlsafe(40)
-                row=Recovery(user_id=user.id,body={'requested_at':time.time(),'status':'issued','token_hash':hashed(token),'expires':time.time()+1800,'delivery':'email' if settings.smtp_host and settings.smtp_from else 'admin'})
+                row=Recovery(user_id=user.id,body={'requested_at':time.time(),'status':'issued','token_hash':hashed(token),'expires':time.time()+1800,'delivery':'email' if email_configured() else 'admin'})
                 db.add(row);db.commit()
                 try:
                     if send_recovery_email(user,token):

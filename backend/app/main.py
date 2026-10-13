@@ -163,8 +163,7 @@ async def security(request: Request, call_next):
     return response
 
 
-@app.middleware('http')
-async def authentication(request:Request,call_next):
+def authenticate_request(request:Request):
     user=None;login=None
     cookie=request.cookies.get('interview_auth')
     with DB() as db:
@@ -181,7 +180,15 @@ async def authentication(request:Request,call_next):
             if request.url.path=='/api/auth/logout' and login:
                 if not hmac.compare_digest(login.csrf,hashed(request.headers.get('x-csrf-token',''))):return Response('CSRF validation failed',status_code=403)
                 db.delete(login);db.commit()
-    context=actor.set(user)
+    return user
+
+
+@app.middleware('http')
+async def authentication(request:Request,call_next):
+    from starlette.concurrency import run_in_threadpool
+    result=await run_in_threadpool(authenticate_request,request)
+    if isinstance(result,Response):return result
+    context=actor.set(result)
     try:return await call_next(request)
     finally:actor.reset(context)
 
@@ -477,7 +484,6 @@ def get_job(jid: str, authorization: str = Header(''), db=Depends(database)):
 def submit_mcq(sid:str, data:MCQSubmission, authorization:str=Header(''), db=Depends(database)):
     from .round_questions import grade_mcq
     s=active_session(sid,db,authorization)
-    s=db.scalar(select(Session).where(Session.id==sid).with_for_update())
     monitored(s)
     q=db.get(Question,data.question_id)
     if not q or q.session_id!=sid:raise HTTPException(404,'Question not found.')
@@ -746,6 +752,12 @@ def complete(sid: str, authorization: str = Header(''), db=Depends(database)):
         for role in ['candidate', 'hr'] if s.mode == 'hr' else ['candidate']:
             if not db.scalar(select(Report).where(Report.token_hash==digest(report_token(sid,role)))):
                 db.add(Report(session_id=sid, role=role, token_hash=digest(report_token(sid, role)), body={'finalized': time.time()}))
+        if s.mode=='hr' and s.body.get('user_id'):
+            from .candidate_notices import add_notice
+            marks=summary.get('overall')
+            message=(f'Your overall score is {marks}/100. ' if isinstance(marks,(int,float)) else 'Your available scores and evaluation status are ready. ')
+            add_notice(db,s.body['user_id'],'interview-results:'+sid,'Your interview marks',message+'Sign in to view your marks and feedback.',
+                '/candidate/results',s.body['hr_id'])
         notify(db,s,'completed','Interview completed; report ready','low')
         db.commit()
     return {role: f'/report/{report_token(sid, role)}' for role in (['candidate', 'hr'] if s.mode == 'hr' else ['candidate'])}

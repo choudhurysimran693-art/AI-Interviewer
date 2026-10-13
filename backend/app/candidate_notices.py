@@ -15,7 +15,7 @@ def add_notice(db, candidate_id, key, title, message, href, hr_id, **details):
     }))
     account=db.get(User,candidate_id)
     db.add(EmailDelivery(id=key,body={'recipient':account.email,'name':account.name,
-        'title':title,'message':message,'href':href,'company':org.name if org else '',**details}))
+        'title':title,'message':message,'href':href,'company':org.name if org else '', 'hr_id':hr_id,**details}))
 
 
 def interview_notice(db, assignment, exam):

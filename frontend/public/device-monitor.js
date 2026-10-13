@@ -1,6 +1,6 @@
 // Independent CPU worker: a face or gaze failure cannot disable object detection.
 self.exports = {};
-let detector;
+let detector, canvas, context;
 let threshold=.35;
 self.onmessage = async ({data}) => {
   const {type, frame, timestamp} = data;
@@ -16,8 +16,11 @@ self.onmessage = async ({data}) => {
       self.postMessage({type:'ready'});
     } else if (type === 'frame') {
       const start=performance.now();
-      const canvas=new OffscreenCanvas(frame.width,frame.height);
-      canvas.getContext('2d').drawImage(frame,0,0);
+      // Reuse the pixel buffer instead of allocating one for every scan.
+      if(!canvas){canvas=new OffscreenCanvas(frame.width,frame.height);context=canvas.getContext('2d');}
+      if(canvas.width!==frame.width)canvas.width=frame.width;
+      if(canvas.height!==frame.height)canvas.height=frame.height;
+      context.drawImage(frame,0,0);
       const result=detector.detect(canvas);
       const detections=result.detections.flatMap(d=>{
         const category=d.categories[0];

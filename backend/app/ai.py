@@ -158,10 +158,10 @@ def local_rubric_evaluate(question: dict, transcript: str):
 def aggregate(evaluations):
     scored = [e for e in evaluations if e.get('status') == 'scored']
     if not scored:
-        return {'technical': None, 'communication': None, 'overall': None, 'coverage': '0 of 5 answers scored'}
+        return {'technical': None, 'communication': None, 'overall': None, 'coverage': f'0 of {len(evaluations)} answers scored'}
     technical = sum(e['technical'] for e in scored)/len(scored)
     communication = sum(e['communication'] for e in scored)/len(scored)
-    return {'technical': round(technical, 1), 'communication': round(communication, 1), 'overall': round(.8*technical+.2*communication, 1), 'coverage': f'{len(scored)} of 5 answers scored'}
+    return {'technical': round(technical, 1), 'communication': round(communication, 1), 'overall': round(.8*technical+.2*communication, 1), 'coverage': f'{len(scored)} of {len(evaluations)} answers scored'}
 
 
 def round_questions(round_type):

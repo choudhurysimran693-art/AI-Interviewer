@@ -274,17 +274,14 @@ def resend(iid:str):
         if not a: raise HTTPException(404,'Interview not found.')
         exam=db.get(Examination,a.exam_id)
         if exam.hr_id not in organization_recruiters(user): raise HTTPException(404,'Interview not found.')
-        if not settings.smtp_host or not settings.smtp_from: raise HTTPException(503,'Email delivery is not configured. The candidate can sign in to view their assigned interview.')
+        from .email_delivery import configured
+        from .candidate_notices import add_notice
+        if not configured():raise HTTPException(503,'Configure an email provider before sending invitations. On Render Free, use the Brevo HTTPS API.')
         account=db.get(User,a.candidate_id)
-        message=EmailMessage();message['Subject']='Your assigned interview';message['From']=settings.smtp_from;message['To']=account.email
-        message.set_content(f"Hello {account.name},\nYour {exam.body['title']} interview is available in your candidate account. Sign in at {settings.public_url.rstrip('/')}/login.")
-        try:
-            with smtplib.SMTP(settings.smtp_host,settings.smtp_port,timeout=10) as smtp:
-                if settings.smtp_use_tls:smtp.starttls()
-                if settings.smtp_user:smtp.login(settings.smtp_user,settings.smtp_password)
-                smtp.send_message(message)
-        except (OSError,smtplib.SMTPException): raise HTTPException(503,'Email could not be delivered. Try again later.')
-        log(db,user,'Sent interview reminder to '+account.name);db.commit();return {'saved':True}
+        add_notice(db,account.id,'interview-reminder:'+uid(),'Your assigned interview',
+            exam.body['title']+' is available in your candidate account.',
+            '/candidate/interview?assignment='+a.id,exam.hr_id)
+        log(db,user,'Queued interview reminder to '+account.name);db.commit();return {'saved':True,'delivery':'queued','message':'Invitation queued. Email delivery retries automatically.'}
 
 @router.post('/interviews/{iid}/reanalyze')
 async def reanalyze(iid:str):
@@ -349,3 +346,14 @@ def analytics(kind:str):
         raise HTTPException(404,'Analytics view not found.')
 
 
+
+
+@router.get('/email-status')
+def email_status():
+    user=require_user('hr','admin')
+    from .email_delivery import configured
+    from .db import EmailDelivery
+    with DB() as db:
+        recruiters=organization_recruiters(user)
+        rows=[{'title':r.body['title'],'recipient':r.body['recipient'],'status':r.status,'attempts':r.attempts,'error':r.body.get('delivery_error')} for r in db.scalars(select(EmailDelivery)) if r.body.get('hr_id') in recruiters]
+        return {'configured':configured(),'provider':settings.email_provider,'items':rows[-30:]}

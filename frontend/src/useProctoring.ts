@@ -56,7 +56,10 @@ export function useProctoring(credentials:Credentials,context:{question_id?:stri
   },[credentials.id,credentials.token,gazeSend]);
   const emit=useCallback<EmitEvent>(async(event,snapshot)=>{
     const id=event.id||crypto.randomUUID();
-    if(event.type==='gaze_sample'&&queue.current.size>=30)return id;
+    // Supplementary samples must not form a backlog ahead of face/device warnings.
+    if(event.type==='gaze_sample'){
+      if(activeFlush.current||queue.current.size)return id;
+    }
     queue.current.set(id,{body:{id,duration:0,timestamp:Math.max(0,Date.now()/1000-created.current),face_coverage:0,object_coverage:0,...current.current,...event},snapshot});
     await flush();
     return `${credentials.id}-${id}`;

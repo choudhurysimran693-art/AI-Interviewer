@@ -9,6 +9,9 @@ os.environ['APP_SECRET'] = 'test-secret-not-for-production-123456789'
 os.environ['GEMINI_API_KEY'] = ''
 os.environ['SMTP_HOST'] = ''
 os.environ['SMTP_FROM'] = ''
+os.environ['BREVO_API_KEY'] = ''
+os.environ['EMAIL_FROM'] = ''
+os.environ['EMAIL_PROVIDER'] = 'smtp'
 os.environ['ENVIRONMENT'] = 'development'
 os.environ['ENABLE_DEMO_DATA'] = 'true' # Legacy demo tests opt in explicitly.
 import pytest

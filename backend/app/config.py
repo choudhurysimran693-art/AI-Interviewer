@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     smtp_password: str = ''
     smtp_from: str = ''
     smtp_use_tls: bool = True
+    email_provider: str = 'smtp'
+    brevo_api_key: str = ''
+    email_from: str = ''
     data_dir: str = './data'
     evidence_retention_days: int = 30
 

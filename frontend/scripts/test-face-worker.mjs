@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+const messages=[];let gazeCalls=0,failGaze=false,canvasAllocations=0;
+const vision={FilesetResolver:{forVisionTasks:async()=>({})},FaceDetector:{createFromOptions:async()=>({detectForVideo:()=>({detections:[{categories:[{score:.9}]},{categories:[{score:.9}]}]})})},FaceLandmarker:{createFromOptions:async()=>({detectForVideo:()=>{gazeCalls++;if(failGaze)throw Error('gaze failed');return {faceLandmarks:[[]]};}})}};
+const self={postMessage:m=>messages.push(m),Gaze:{classify:()=>({gaze_direction:'center'})}};
+const context=vm.createContext({self,importScripts:()=>Object.assign(self.exports,vision),OffscreenCanvas:class{constructor(width,height){this.width=width;this.height=height;canvasAllocations++;}getContext(){return {drawImage(){}}}}});
+vm.runInContext(readFileSync(new URL('../public/face-monitor.js',import.meta.url),'utf8'),context);
+await self.onmessage({data:{type:'init'}});
+for(const timestamp of [1000,1334,1668])await self.onmessage({data:{type:'frame',timestamp,frame:{width:640,height:480,close(){}}}});
+assert.equal(gazeCalls,1);
+assert.equal(messages.filter(m=>m.type==='result').length,3);
+assert.ok(messages.filter(m=>m.type==='result').every(m=>m.count===2));
+failGaze=true;
+await self.onmessage({data:{type:'frame',timestamp:2100,frame:{width:640,height:480,close(){}}}});
+assert.equal(messages.at(-1).type,'result');assert.equal(messages.at(-1).count,2);
+assert.equal(canvasAllocations,1,'Reuse a single canvas across frames');
+console.log('Face worker regression checks passed: independent face count, throttled gaze, gaze failure isolation.');

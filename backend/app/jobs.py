@@ -37,8 +37,7 @@ def transcribe(path):
 
 async def work_once():
     with DB() as db:
-        job = db.scalars(select(Job)).all()
-        job = next((j for j in job if j.body.get('status') == 'queued'), None)
+        job = db.scalar(select(Job).where(Job.body['status'].as_string() == 'queued').limit(1))
         if not job:
             return False
         answer = db.get(Answer, job.body['answer_id'])
@@ -89,7 +88,8 @@ async def worker(stop):
         db.commit()
     while not stop.is_set():
         try:
-            if not await work_once():
+            # Database polling and job persistence must not block HTTP/heartbeat handling.
+            if not await asyncio.to_thread(lambda: asyncio.run(work_once())):
                 await asyncio.sleep(.5)
         except Exception:
             await asyncio.sleep(1)
