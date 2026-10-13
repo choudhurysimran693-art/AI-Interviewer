@@ -565,7 +565,7 @@ def observation(sid: str, data: ObservationInput, authorization: str = Header(''
     oid = f'{sid}-{data.id}'
     prior = db.get(Observation, oid)
     body = describe(data.model_dump(), s.created) | {'received_at':time.time(), 'limitation': 'Client-reported observations require human review and do not establish cheating.'}
-    config = {**config, 'device_warning_only': not validation_status()['passed']}
+    config = {**config, 'device_warning_only': False} # Separate, server-persisted two-strike device policy.
     if prior:
         body = prior.body | {'duration': max(prior.body['duration'], data.duration)}
     db.merge(Observation(id=oid, session_id=sid, body=body))
@@ -655,7 +655,7 @@ def record_device_warning(sid:str,data:dict,authorization:str=Header(''),db=Depe
     oid=f"{sid}-{data.get('event_id','')}"
     event=db.get(Observation,oid)
     if not event or event.session_id!=sid or event.body.get('type')!='device':raise HTTPException(422,'A confirmed device event is required.')
-    device_warning(db,s,oid,warning_only=not validation_status()['passed']);db.commit()
+    device_warning(db,s,oid,warning_only=False);db.commit()
     return {'status':s.status,'security':s.body.get('security',{}),'device_warning_count':s.body.get('device_warning_count',0)}
 
 

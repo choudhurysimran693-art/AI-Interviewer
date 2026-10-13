@@ -18,7 +18,7 @@ self.onmessage = async ({data}) => {
       } catch (_) { landmarksAvailable=false; }
       detector = await self.exports.FaceDetector.createFromOptions(files, {
         baseOptions: {modelAssetPath:'/models/face/blaze_face_short_range.tflite', delegate:'CPU'},
-        runningMode:'VIDEO', minDetectionConfidence:0.75
+        runningMode:'VIDEO', minDetectionConfidence:0.5
       });
       self.postMessage({type:'ready'});
     } else if (type === 'frame') {
@@ -35,7 +35,7 @@ self.onmessage = async ({data}) => {
         try{mesh=landmarker.detectForVideo(canvas,timestamp);}catch(_){landmarksAvailable=false;}
       }
       const gazeResult=mesh?.faceLandmarks?.length===1?self.Gaze.classify(mesh.faceLandmarks[0],mesh.facialTransformationMatrixes?.[0]?.data):null;
-      self.postMessage({type:'result', timestamp, count:result.detections.length,
+      self.postMessage({type:'result', timestamp, count:Math.max(result.detections.length,mesh?.faceLandmarks?.length||0),
         confidence:result.detections.length?Math.min(...result.detections.map(d=>d.categories[0].score)):null,
         ...(gazeResult||{gaze_direction:'off_screen',head_pose_angle:0}), gaze_available:!!gazeResult, gaze_valid:!!gazeResult});
     }

@@ -40,20 +40,18 @@ def test_hr_without_validated_device_detector(client, monkeypatch):
                    {'fullscreen': False}, {'page_visible': False}, {'evidence_ready': False}]:
         assert not client.post(base + '/monitoring/heartbeat', headers=h, json=health | change).json()['healthy']
     client.post(base + '/monitoring/heartbeat', headers=h, json=health)
-    for event_id in ['first-device','second-device','second-device']:
+    for event_id in ['first-device','first-device','second-device']:
         response=client.post(base + '/observations', headers=h, json={
         'id': event_id, 'type': 'device', 'label': 'mobile phone', 'score': .99, 'timestamp': 1,
         'duration': 1, 'stage': 'answer', 'face_coverage': 1, 'object_coverage': 0
         })
         assert response.status_code==200,response.text
-        assert response.json()['status']!='terminated'
-    assert client.post(base + '/device-warning', headers=h, json={'event_id': 'forged'}).status_code == 422
-    assert client.post(base + '/device-warning', headers=h, json={'event_id': 'second-device'}).status_code == 200
+        assert (response.json()['status']=='terminated') == (event_id=='second-device')
     with DB() as db:
         state=db.get(Session,c['id']).body['security']
         assert state['device_warning_count']==2
-        assert not state.get('terminated_reason')
-    assert client.post(base+'/device-warning/acknowledge',headers=h).status_code==200
+        assert state['terminated_reason']=='device_detected_repeat'
+
 
 
 def test_mcq_camera_required_but_microphone_optional(client):

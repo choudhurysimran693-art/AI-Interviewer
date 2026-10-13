@@ -36,6 +36,7 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
       const objectWorker=deviceEnabled?createDeviceWorker():null;
       const fastWorker=deviceEnabled?new Worker('/device-monitor.js'):null;
       let fastReady=false,fastBusy=false,lastFast=0;
+      let slowDevices:ReturnType<typeof deviceDetections>=[],slowDetectedAt=0;
       if(fastWorker){
         fastWorker.onmessage=({data})=>{
           if(disposed)return;
@@ -45,7 +46,13 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
             fastBusy=false;
             const found=deviceDetections(data.detections,config.device_confidence);
             setFastDeviceStatus(found.length?`Possible ${found[0].label} detected`:`Phone scan active (${Math.round(data.latency)} ms)`);
-            if(found.length&&!['equipment','finish'].includes(current.current.stage))setWarning(`Possible ${found[0].label} detected. Remove the device from the camera view.`);
+            if(!['equipment','finish'].includes(current.current.stage)){
+              const now=performance.now();
+              for(const item of tracker.update([...found,...(now-slowDetectedAt<30000?slowDevices:[])],now)){
+                send({id:item.id,type:'device',duration:item.duration,label:item.label,score:item.score,box:item.box,metadata:{model:'EfficientDet Lite0 + device scan',confirmed:item.confirmed}});
+              }
+            }
+            if(found.length&&!(visibleFaces!==null&&visibleFaces>1)&&!['equipment','finish'].includes(current.current.stage))setWarning(`Possible ${found[0].label} detected. Remove the device from the camera view.`);
           }
         };
         fastWorker.onerror=()=>{fastBusy=false;fastReady=false;setFastDeviceStatus('Phone scan unavailable');};
@@ -103,14 +110,16 @@ export function useMonitoring(credentials:Credentials,hr:boolean,context:{questi
         if(data.type==='result'){
           lastObject=performance.now();objectLatency=data.latency;objectCount++;objectFast=data.latency<=deviceBudget;
           const devices=deviceDetections(data.detections,config.device_confidence);
-          if(devices.length&&current.current.stage!=='equipment'&&current.current.stage!=='finish')setWarning(`A possible ${devices[0].label} is visible. Please remove it. Confirming the detection…`);
+          if(devices.length&&!(visibleFaces!==null&&visibleFaces>1)&&current.current.stage!=='equipment'&&current.current.stage!=='finish')setWarning(`A possible ${devices[0].label} is visible. Please remove it. Confirming the detection…`);
           tracker.setMaxGap(Math.min(deviceBudget,Math.max(config.device_max_gap_ms,8000,data.latency*2+6000)));
           setDeviceStatus(!objectFast?(objectRequired?'Device scan exceeded the time limit. Retry monitoring.':'Device scanning is slow. Answers can continue; detections require review.'):devices.length?`Possible ${devices[0].label} (${Math.round(devices[0].score*100)}%)`:`Scanning camera view Â· ${(data.latency/1000).toFixed(1)}s per scan`);
           if(current.current.stage==='equipment'||current.current.stage==='finish'){
             if(current.current.stage==='equipment')setWarning(old=>devices.length?`Equipment check: remove the ${devices[0].label} from the camera view before starting.`:old.startsWith('Equipment check:')?'':old);
             tracker.tracks.clear();objectBusy=false;return;
           }
-          for(const item of tracker.update(devices,lastObject)){
+          slowDevices=devices;slowDetectedAt=lastObject;
+          // A single tracker combines both detectors, preventing duplicate strikes.
+          for(const item of (fastReady?[]:tracker.update(devices,lastObject))){
             let picture:Blob|undefined;
             if(item.confirmed){
               setWarning(`A possible ${item.label} was detected in the camera view. Please remove it. This event requires review.`);
