@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     enable_demo_data: bool = False
     database_url: str = 'sqlite:///./data/interview.db'
     app_secret: str = ''
+    ai_provider: str = 'gemini'
+    groq_api_key: str = ''
+    groq_model: str = 'llama-3.3-70b-versatile'
     gemini_api_key: str = ''
     gemini_model: str = 'gemini-2.5-flash'
     supabase_url: str = ''
