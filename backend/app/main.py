@@ -28,7 +28,7 @@ from .jobs import worker
 from .accounts import actor, require_user, hashed, organization_recruiters, router as auth_router
 from .db import User, LoginSession, Assignment, Examination
 from .portal import router as portal_router
-from .recruitment import router as recruitment_router
+from .recruitment import router as recruitment_router, positions_router
 from .candidate_workspace import router as candidate_router
 from .applications import router as applications_router
 from .exam_policy import apply_policy, release_lock, notify, system_event, device_warning
@@ -117,6 +117,7 @@ app = FastAPI(title='Interview Studio', lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(portal_router)
 app.include_router(recruitment_router)
+app.include_router(positions_router)
 app.include_router(candidate_router)
 app.include_router(applications_router)
 from .screening import router as screening_router

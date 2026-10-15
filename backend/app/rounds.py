@@ -173,6 +173,7 @@ def get_rounds(pid:str):
         if not p or p.organization_id!=organization_scope(user):raise HTTPException(404,'Position not found.')
         return [definition(d) for d in definitions(db,pid)]
 
+@router.patch('/positions/{pid}/rounds')
 @router.post('/positions/{pid}/rounds')
 def define_rounds(pid:str,body:SequenceInput):
     user=require_user('hr','admin')
@@ -284,3 +285,14 @@ def apply_decision(db,r,a,user,body):
             message+=('HR has recorded a hire decision and will contact you with next steps.' if a.status=='hired' else 'All rounds are complete. HR will contact you about the final decision.')
     add_notice(db,a.candidate_id,'round-result:'+r.id,d.round_name+' result',message,'/candidate/applications',user.id,type='round_result',related_application_round_id=r.id)
     return history(db,a,True)
+
+@router.delete('/positions/{pid}/rounds')
+def clear_rounds(pid:str):
+    user=require_user('hr','admin')
+    with DB() as db:
+        p=db.get(RecruitmentPosition,pid,with_for_update=True)
+        if not p or p.organization_id!=organization_scope(user):raise HTTPException(404,'Position not found.')
+        if db.scalar(select(ApplicationRound).join(InterviewRound).where(InterviewRound.position_id==pid)):
+            raise HTTPException(409,'Rounds cannot be changed after candidates enter this pipeline.')
+        db.execute(delete(InterviewRound).where(InterviewRound.position_id==pid));db.commit()
+        return {'saved':True}

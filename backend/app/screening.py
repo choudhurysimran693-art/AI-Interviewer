@@ -215,3 +215,7 @@ def request_information(aid:str,data:InformationRequest):
         a=owned(db,aid,user)
         add_notice(db,a.candidate_id,'screening-request:'+uid(),'HR requested resume information',data.message,'/candidate/profile',user.id)
         db.commit();return {'saved':True}
+
+@router.delete('/positions/{pid}/criteria')
+def clear_criteria(pid:str):
+    return save_criteria(pid,CriteriaInput(criteria=[]))

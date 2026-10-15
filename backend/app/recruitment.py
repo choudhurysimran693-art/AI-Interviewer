@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from .accounts import organization_scope, organization_recruiters, require_user
 from .db import DB, User, Examination, Assignment, Session, Answer, Question, Application, Notification, RecruitmentPosition as Position, RecruitmentCandidate as Candidate, RecruitmentActivity as Activity, uid
@@ -165,14 +165,35 @@ class PositionInput(BaseModel):
     title:str=Field(min_length=2,max_length=150)
     department:str=Field(default='Engineering',max_length=100)
     vacancies_total:int=Field(default=1,ge=1,le=10000)
-    status:Literal['open','closed']='open'
+    status:Literal['open','closed','paused']='open'
+    level:Literal['junior','mid','senior']|None=None
+    screening_type:Literal['resume_based','aptitude_first','direct_technical']='resume_based'
     difficulty:Literal['intern','junior','mid-level','senior']='junior'
     question_set:Literal['Resume-based']='Resume-based'
 
+    @model_validator(mode='after')
+    def synchronize_level(self):
+        if self.level is not None:self.difficulty={'mid':'mid-level'}.get(self.level,self.level)
+        return self
+
+
 @router.get('/positions')
-def positions(status:str='open'):
+def positions(status:str='open',include:str=''):
     user=require_user('hr','admin')
-    with DB() as db: return {'items':[p for p in data(db,user)['positions'] if (not status or p['status']==status) and (settings.enable_demo_data or not p.get('demo'))]}
+    from .role_cards import pipeline_summaries, card
+    with DB() as db:
+        rows=[p for p in db.scalars(select(Position).where(Position.organization_id==organization_scope(user))) if (not status or p.body['status']==status) and (settings.enable_demo_data or not p.body.get('demo'))]
+        summaries=pipeline_summaries(db,[p.id for p in rows]) if include=='pipeline_summary' else {}
+        return {'items':[card(p,summaries.get(p.id)) for p in rows]}
+
+@router.get('/positions/{pid}/pipeline-summary')
+def pipeline_summary(pid:str):
+    user=require_user('hr','admin')
+    from .role_cards import pipeline_summaries
+    with DB() as db:
+        owned(db,Position,pid,user)
+        return pipeline_summaries(db,[pid])[pid]
+
 
 SAMPLE_ROLES=[('Backend Engineer','Engineering'),('Frontend Engineer','Engineering'),('Full Stack Developer','Engineering'),('Data Scientist / ML Engineer','Data Science'),('DevOps Engineer','Infrastructure'),('QA Engineer','Quality Assurance'),('Mobile Developer (Android/iOS)','Engineering'),('UI/UX Designer','Design'),('Product Manager','Product'),('Business Analyst','Business Operations'),('System Administrator','IT'),('Cloud/Solutions Architect','Infrastructure')]
 
@@ -190,13 +211,16 @@ def seed_positions():
 def create_position(body:PositionInput):
     user=require_user('hr','admin')
     with DB() as db:
-        p=Position(hr_id=user.id,organization_id=organization_scope(user),body=body.model_dump()|{'opened_at':time.time()});db.add(p);log(db,user,'Created role: '+body.title);db.commit();return {'id':p.id}
+        p=Position(hr_id=user.id,organization_id=organization_scope(user),body=body.model_dump()|{'opened_at':time.time(),'vacancies_filled':0});db.add(p);log(db,user,'Created role: '+body.title);db.commit();return {'id':p.id}
 
 @router.patch('/positions/{pid}')
 def edit_position(pid:str,body:PositionInput):
     user=require_user('hr','admin')
     with DB() as db:
-        p=owned(db,Position,pid,user);p.body=p.body|body.model_dump();log(db,user,'Updated role: '+body.title);db.commit();return {'saved':True}
+        p=owned(db,Position,pid,user);p=db.get(Position,pid,with_for_update=True);values=body.model_dump();
+        if body.vacancies_total<p.body.get('vacancies_filled',0):raise HTTPException(409,'Vacancies cannot be below the number already hired.')
+        if body.vacancies_total==p.body.get('vacancies_filled',0):values['status']='closed'
+        p.body=p.body|values;log(db,user,'Updated role: '+body.title);db.commit();return {'saved':True}
 
 @router.get('/positions/{pid}/pipeline')
 def pipeline(pid:str):
@@ -357,3 +381,10 @@ def email_status():
         recruiters=organization_recruiters(user)
         rows=[{'title':r.body['title'],'recipient':r.body['recipient'],'status':r.status,'attempts':r.attempts,'error':r.body.get('delivery_error')} for r in db.scalars(select(EmailDelivery)) if r.body.get('hr_id') in recruiters]
         return {'configured':configured(),'provider':settings.email_provider,'items':rows[-30:]}
+
+# Public role API aliases retain the same authentication and organization checks.
+positions_router=APIRouter(prefix='/api')
+positions_router.add_api_route('/positions',positions,methods=['GET'])
+positions_router.add_api_route('/positions',create_position,methods=['POST'])
+positions_router.add_api_route('/positions/{pid}',edit_position,methods=['PATCH'])
+positions_router.add_api_route('/positions/{pid}/pipeline-summary',pipeline_summary,methods=['GET'])

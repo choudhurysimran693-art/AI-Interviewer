@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, String, Float, ForeignKey, JSON, LargeBinary, event, UniqueConstraint
+from sqlalchemy import create_engine, String, Float, ForeignKey, JSON, LargeBinary, event, UniqueConstraint, Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from .config import settings
 import time
@@ -150,7 +150,7 @@ class RecruitmentCandidate(Base):
 
 class Application(Base):
     __tablename__ = 'applications'
-    __table_args__ = (UniqueConstraint('candidate_id','position_id'),)
+    __table_args__ = (UniqueConstraint('candidate_id','position_id'), Index('ix_applications_position_status','position_id','status'))
     id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
     candidate_id: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
     position_id: Mapped[str] = mapped_column(ForeignKey('recruitment_positions.id'), index=True)
@@ -262,6 +262,8 @@ DB = sessionmaker(engine, expire_on_commit=False)
 
 def init_db():
     Base.metadata.create_all(engine)
+    for index in Application.__table__.indexes:
+        index.create(engine,checkfirst=True)
     from .round_templates import migrate, seed
     migrate(engine)
     with DB() as template_db:
