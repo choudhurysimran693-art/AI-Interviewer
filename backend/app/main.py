@@ -116,6 +116,8 @@ async def lifespan(app):
 app = FastAPI(title='Interview Studio', lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(portal_router)
+from .analytics import router as analytics_router
+app.include_router(analytics_router)
 app.include_router(recruitment_router)
 app.include_router(positions_router)
 app.include_router(candidate_router)
