@@ -150,7 +150,7 @@ class RecruitmentCandidate(Base):
 
 class Application(Base):
     __tablename__ = 'applications'
-    __table_args__ = (UniqueConstraint('candidate_id','position_id'), Index('ix_applications_position_status','position_id','status'))
+    __table_args__ = (UniqueConstraint('candidate_id','position_id'), Index('ix_applications_position_status','position_id','status'), Index('ix_applications_updated_at','updated_at'))
     id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
     candidate_id: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
     position_id: Mapped[str] = mapped_column(ForeignKey('recruitment_positions.id'), index=True)

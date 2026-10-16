@@ -5,9 +5,7 @@ from .db import Application, ApplicationRound, InterviewRound
 
 STAGES=('source','shortlist','screening','interview','offer','hired','rejected')
 
-def pipeline_summaries(db, position_ids):
-    result={pid:dict.fromkeys(STAGES,0) for pid in position_ids}
-    if not result:return result
+def pipeline_stage_expression():
     def has_round(types, statuses):
         return select(ApplicationRound.id).join(InterviewRound).where(
             ApplicationRound.application_id==Application.id,
@@ -24,6 +22,12 @@ def pipeline_summaries(db, position_ids):
         (Application.status=='under_review','screening'),
         (Application.status.in_(['interview_scheduled','interviewed']),'interview'),
         else_='source')
+    return stage
+
+def pipeline_summaries(db, position_ids):
+    result={pid:dict.fromkeys(STAGES,0) for pid in position_ids}
+    if not result:return result
+    stage=pipeline_stage_expression()
     query=select(Application.position_id,stage.label('stage'),func.count()).where(Application.position_id.in_(position_ids)).group_by(Application.position_id,stage)
     for pid,name,count in db.execute(query):result[pid][name]=count
     return result
