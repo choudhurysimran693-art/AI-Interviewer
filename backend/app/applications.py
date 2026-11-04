@@ -34,7 +34,11 @@ def read_notification(nid:str):
     with DB() as db:
         n=db.get(CandidateNotice,nid)
         if not n or n.candidate_id!=user.id:raise HTTPException(404,'Notification not found.')
-        n.body=n.body|{'read':True};db.commit();return {'saved':True}
+        n.body=n.body|{'read':True}
+        from .db import WorkflowNotification
+        workflow=db.get(WorkflowNotification,nid)
+        if workflow:workflow.is_read=True
+        db.commit();return {'saved':True}
 STAGES=['applied','under_review','interview_scheduled','interviewed','shortlisted','offer_extended','hired','rejected']
 TRANSITIONS={'applied':{'under_review','interview_scheduled','rejected'},'under_review':{'interview_scheduled','shortlisted','rejected'},'interview_scheduled':{'interviewed','rejected'},'interviewed':{'shortlisted','rejected'},'shortlisted':{'interview_scheduled','offer_extended','rejected'},'offer_extended':{'hired','rejected'},'hired':set(),'rejected':set(),'ready_for_offer':{'offer_extended','rejected'}}
 
@@ -177,7 +181,7 @@ def transition(db,a,status,user,notes=None):
         if filled>=p.body['vacancies_total']:raise HTTPException(409,'All vacancies for this role have been filled.')
         p.body=p.body|{'vacancies_filled':filled+1,'status':'closed' if filled+1>=p.body['vacancies_total'] else p.body['status']}
     if status!=a.status:log(db,user,f'{db.get(User,a.candidate_id).name}: {a.status} → {status} ({p.body["title"]})')
-    newly_shortlisted=status=='shortlisted' and a.status!=status
+    changed=status!=a.status
     a.status=status;a.updated_at=time.time()
     if status=='shortlisted':
         initialize(db,a,user)
@@ -188,14 +192,16 @@ def transition(db,a,status,user,notes=None):
             db.add(exam);db.flush()
             assignment=Assignment(id=uid(),exam_id=exam.id,candidate_id=a.candidate_id,body={'status':'assigned','application_id':a.id,'position_id':p.id})
             db.add(assignment);db.flush();a.assignment_id=assignment.id
-        if newly_shortlisted and a.assignment_id:
-            assignment=db.get(Assignment,a.assignment_id)
-            exam=db.get(Examination,assignment.exam_id)
-            add_notice(db,a.candidate_id,'shortlisted:'+a.id,'You have been shortlisted',
-                       'You have been shortlisted for '+p.body['title']+'. Open your interview invitation using the link below.',
-                       '/candidate/interview?assignment='+a.assignment_id,user.id,
-                       scheduled_at=exam.body.get('window_start_at',exam.body.get('opens_at')),
-                       window_end_at=exam.body.get('window_end_at'))
+    if changed:
+        from .notifier import notify
+        from .db import InterviewRound
+        entries=rounds(db,a.id)
+        active=next((r for r in entries if r.status not in ('passed','pending')),None)
+        number=db.get(InterviewRound,active.round_id).round_order if active else (db.get(InterviewRound,entries[-1].round_id).round_order if entries else 0)
+        if status=='shortlisted':
+            if entries and entries[0].status=='passed':notify(a.id,'next_round',1,db=db)
+            elif not entries:notify(a.id,'next_round',1,db=db)
+        else:notify(a.id,'rejected' if status=='rejected' else 'selected' if status=='hired' else 'stage_'+status,number,db=db)
     if notes is not None:a.hr_notes=notes
 
 @router.patch('/applications/{aid}/status')
@@ -235,3 +241,24 @@ def schedule(aid:str,body:ScheduleInput):
         db.add(exam);db.flush();assignment=Assignment(id=uid(),exam_id=exam.id,candidate_id=a.candidate_id,body={'status':'assigned','application_id':a.id,'position_id':p.id});db.add(assignment);db.flush();a.assignment_id=assignment.id;interview_notice(db,assignment,exam);db.commit();return view(db,a,True)
 
 
+
+
+@router.get('/hr/candidates/{candidate_id}/workflow-notifications')
+def workflow_log(candidate_id: str):
+    from .db import WorkflowNotification
+    user=require_user('hr','admin')
+    with DB() as db:
+        rows=db.scalars(select(WorkflowNotification).join(Application,Application.id==WorkflowNotification.application_id).join(Position,Position.id==Application.position_id).where(Position.organization_id==organization_scope(user),WorkflowNotification.candidate_id==candidate_id).order_by(WorkflowNotification.created_at.desc()))
+        return [{'id':r.id,'type':r.type,'title':r.title,'created_at':r.created_at,'email_status':r.email_status} for r in rows]
+
+@router.post('/hr/workflow-notifications/{key}/retry')
+def retry_workflow_email(key: str):
+    from .db import WorkflowNotification
+    from .notifier import retry_failed
+    user=require_user('hr','admin')
+    with DB() as db:
+        row=db.get(WorkflowNotification,key)
+        if not row:raise HTTPException(404,'Notification not found.')
+        owned(db,row.application_id,user)
+        retried=retry_failed(db,key);db.commit()
+        return {'queued':retried}

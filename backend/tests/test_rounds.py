@@ -3,7 +3,7 @@ from sqlalchemy import select
 from test_accounts import staff, start
 from app.db import DB, ApplicationRound, CandidateNotice, EmailDelivery, Answer, Session, Examination, Assignment
 
-DEFINITIONS=[{'round_type':kind,'round_name':name} for kind,name in [('resume_screening','Resume Screening'),('aptitude','Aptitude Test'),('technical','Technical Round'),('hr','HR Round')]]
+DEFINITIONS=[{'round_type':kind,'round_name':name} for kind,name in [('technical_deep','Technical Interview'),('aptitude','Aptitude Test'),('technical','Technical Round'),('hr','HR Round')]]
 
 def setup_pipeline(client):
     hr=staff()
@@ -47,7 +47,7 @@ def test_four_rounds_and_notifications(client):
     with DB() as db:
         notices=list(db.scalars(select(CandidateNotice)))
         assert sum(n.body.get('type')=='round_invite' for n in notices)==4
-        assert sum(n.body.get('type')=='round_result' for n in notices)==4
+        assert sum(n.body.get('type') in ('next_round','rounds_completed') for n in notices)==4
         assert len(list(db.scalars(select(EmailDelivery))))==len(notices)
     assert hr.patch(f'/api/applications/{aid}/status',json={'status':'offer_extended'}).status_code==200
 
@@ -68,7 +68,7 @@ def test_round_security_failure_and_configuration(client):
     application=client.get('/api/candidate/applications').json()[0]
     assert application['status']=='rejected'
     with DB() as db:
-        result=db.get(CandidateNotice,'round-result:'+entries[0]['id'])
+        result=next(n for n in db.scalars(select(CandidateNotice)) if n.body.get('application_id')==aid and n.body.get('type')=='rejected')
         assert '23' not in result.body['message']
     counts=hr.get('/api/recruitment/dashboard/overview').json()['round_counts']
     assert counts=={'rejected':1}
@@ -81,7 +81,7 @@ def test_disabled_rounds_windows_and_unread_count(client):
     aid=client.post('/api/applications',json={'position_id':pid}).json()['id']
     for status in ['under_review','shortlisted']:assert hr.patch(f'/api/applications/{aid}/status',json={'status':status}).status_code==200
     entries=hr.get(f'/api/hr/applications/{aid}/rounds').json()
-    assert [r['round_type'] for r in entries]==['resume_screening','technical','hr']
+    assert [r['round_type'] for r in entries]==['technical_deep','technical','hr']
     n=client.get('/api/candidate/notifications?envelope=true').json()
     assert n['unread_count']==len(n['items'])
     notice=next(x for x in n['items'] if x.get('type')=='round_invite')

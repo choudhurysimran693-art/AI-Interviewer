@@ -13,6 +13,6 @@ export function resolveRoute(role:string|null, path:string, search:string,worksp
   if(query.has('assignment')||query.has('resume')) return candidate ? '/candidate/interview'+search : home;
   if(candidate&&workspace==='candidate'&&(path==='/candidate/practice'||query.get('workspace')==='practice'))return home;
   if(query.has('workspace')) return candidate && query.get('workspace')==='practice' ? '/candidate/practice' : home;
-  const pages=candidate?['dashboard','practice','interview','results','profile','positions','applications']:['dashboard','candidates','interviews','jobs','reports','applications'];
+  const pages=candidate?['dashboard','practice','interview','results','profile','positions','applications','messages']:['dashboard','candidates','interviews','jobs','reports','applications'];
   return pages.some(page=>path===`${candidate?'/candidate':'/hr'}/${page}`) ? path+search : home;
 }

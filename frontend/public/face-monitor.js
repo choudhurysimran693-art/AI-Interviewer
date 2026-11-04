@@ -9,6 +9,12 @@ self.onmessage = async ({data}) => {
     if (type === 'init') {
       importScripts('/vision/vision_bundle.js');
       const files = await self.exports.FilesetResolver.forVisionTasks('/vision/wasm');
+      detector = await self.exports.FaceDetector.createFromOptions(files, {
+        baseOptions: {modelAssetPath:'/models/face/blaze_face_short_range.tflite', delegate:'CPU'},
+        runningMode:'VIDEO', minDetectionConfidence:0.5
+      });
+      self.postMessage({type:'ready'});
+      // Initialize optional gaze after the required face detector is ready.
       try {
         landmarker = await self.exports.FaceLandmarker.createFromOptions(files, {
           baseOptions:{modelAssetPath:'/models/face/face_landmarker.task',delegate:'CPU'},runningMode:'VIDEO',numFaces:2,
@@ -16,11 +22,7 @@ self.onmessage = async ({data}) => {
         });
         landmarksAvailable=true;
       } catch (_) { landmarksAvailable=false; }
-      detector = await self.exports.FaceDetector.createFromOptions(files, {
-        baseOptions: {modelAssetPath:'/models/face/blaze_face_short_range.tflite', delegate:'CPU'},
-        runningMode:'VIDEO', minDetectionConfidence:0.5
-      });
-      self.postMessage({type:'ready'});
+
     } else if (type === 'frame') {
       // Reuse the pixel buffer instead of allocating one for every scan.
       if(!canvas){canvas=new OffscreenCanvas(frame.width,frame.height);context=canvas.getContext('2d');}

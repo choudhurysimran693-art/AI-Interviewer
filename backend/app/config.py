@@ -1,5 +1,6 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 import secrets
 
 
@@ -9,6 +10,12 @@ class Settings(BaseSettings):
     enable_demo_data: bool = False
     database_url: str = 'sqlite:///./data/interview.db'
     app_secret: str = ''
+    enable_semantic_analysis: bool = False
+    enable_voice_analysis: bool = False
+    enable_expression_analysis: bool = False
+    analysis_python: str = ''
+    analysis_model_dir: str = './data/analysis-models'
+    analysis_timeout_seconds: int = Field(default=60, ge=5, le=120)
     ai_provider: str = 'gemini'
     groq_api_key: str = ''
     groq_model: str = 'llama-3.3-70b-versatile'
@@ -20,6 +27,9 @@ class Settings(BaseSettings):
     detector_validation_file: str = './data/detector-validation.json'
     proctor_config_file: str = './data/proctor-config.json'
     public_url: str = 'http://localhost:5173'
+    include_resume_screening_round: bool = False
+    require_sequential_interviews: bool = True
+    dry_run: bool = False
     smtp_host: str = ''
     smtp_port: int = 587
     smtp_user: str = ''

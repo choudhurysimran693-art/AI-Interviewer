@@ -243,6 +243,22 @@ class CandidateNotice(Base):
     body: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class WorkflowNotification(Base):
+    """Durable candidate round/stage event; existing HR notifications stay separate."""
+    __tablename__ = 'workflow_notifications'
+    __table_args__ = (UniqueConstraint('application_id','round_no','type'),)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    candidate_id: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
+    application_id: Mapped[str] = mapped_column(ForeignKey('applications.id'), index=True)
+    round_no: Mapped[int] = mapped_column()
+    type: Mapped[str] = mapped_column(String)
+    title: Mapped[str] = mapped_column(String)
+    message: Mapped[str] = mapped_column(String)
+    is_read: Mapped[bool] = mapped_column(default=False)
+    email_status: Mapped[str] = mapped_column(String, default='pending')
+    created_at: Mapped[float] = mapped_column(Float, default=time.time)
+
+
 class Recovery(Base):
     __tablename__ = 'password_recovery'
     id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)

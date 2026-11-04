@@ -1,3 +1,4 @@
+from .config import settings
 from .candidate_notices import interview_notice
 import time
 import secrets
@@ -12,7 +13,7 @@ from .proctoring import ProctorConfig
 router=APIRouter(prefix='/api/portal')
 def window_status(exam, assignment, session, now=None):
     now=now or time.time(); b=exam.body; start=b.get('window_start_at',b.get('opens_at',0)); end=b.get('window_end_at',start+7200 if start else 0)
-    if assignment.body.get('status') in ('attempt_deleted','terminated','completed'):
+    if assignment.body.get('status') in ('attempt_deleted','terminated','completed','cancelled'):
         return assignment.body['status']
     if session:
         if session.status=='complete': return 'completed'
@@ -61,7 +62,7 @@ def dashboard():
             if user.role in ('hr','admin') and exam.hr_id not in organization_recruiters(user):continue
             candidate=db.get(User,a.candidate_id);session=db.get(Session,a.session_id) if a.session_id else None
             start=exam.body.get('window_start_at',exam.body.get('opens_at',0));end=exam.body.get('window_end_at',start+7200 if start else 0)
-            assignments.append({'id':a.id,'exam_id':exam.id,'title':exam.body['title'],'role':exam.body['role'],'level':exam.body['level'],'instructions':exam.body.get('instructions','Complete your assigned interview.'),'interview_type':exam.body.get('interview_type','resume_based'),'opens_at':start,'window_start_at':start,'window_end_at':end,'candidate':public(candidate),'session_id':a.session_id,'status':window_status(exam,a,session),'security':session.body.get('security',{}) if session else {},'started_at':session.body.get('exam_started_at') if session else None,'ended_at':session.body.get('ended_at') if session else None,'policy':exam.body['policy']})
+            assignments.append({'requires_round':settings.require_sequential_interviews,'application_round_id':a.body.get('application_round_id'),'id':a.id,'exam_id':exam.id,'title':exam.body['title'],'role':exam.body['role'],'level':exam.body['level'],'instructions':exam.body.get('instructions','Complete your assigned interview.'),'interview_type':exam.body.get('interview_type','resume_based'),'opens_at':start,'window_start_at':start,'window_end_at':end,'candidate':public(candidate),'session_id':a.session_id,'status':window_status(exam,a,session),'security':session.body.get('security',{}) if session else {},'started_at':session.body.get('exam_started_at') if session else None,'ended_at':session.body.get('ended_at') if session else None,'policy':exam.body['policy']})
         db.commit()
         history=[{'id':s.id,'role':s.body['role'],'status':s.status,'created':s.created} for s in db.scalars(select(Session)) if s.body.get('user_id')==user.id and s.mode=='practice']
         notifications=[{'id':n.id,'session_id':n.session_id,**n.body} for n in db.scalars(select(Notification)) if user.role in ('hr','admin') and n.hr_id in organization_recruiters(user)]
@@ -139,6 +140,9 @@ def resume(sid:str):
         if not s or s.body.get('user_id')!=user.id:raise HTTPException(404)
         if s.status in ['terminated','deleting'] or s.expires<=time.time():raise HTTPException(409,'This attempt cannot be resumed.')
         if s.status=='complete':return {'report':f'/report/{report_token(s.id,"candidate")}'}
+        from .config import settings
+        if settings.require_sequential_interviews and s.mode=='hr' and not s.body.get('application_round_id'):
+            raise HTTPException(409,'This is a legacy spoken interview. Open My applications and start your current round. Ask HR to enable the standard rounds if none is shown.')
         return {'id':sid,'token':session_token(sid)}
 
 @router.get('/reports/{sid}')

@@ -1,0 +1,13 @@
+import vm from 'node:vm';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const messages=[];
+const exports={FilesetResolver:{forVisionTasks:async()=>({})},FaceDetector:{createFromOptions:async()=>({detectForVideo:()=>({detections:[{categories:[{score:.9}]}]})})},FaceLandmarker:{createFromOptions:()=>new Promise(()=>{})}};
+const context={self:{postMessage:m=>messages.push(m)},importScripts:()=>{context.self.exports=exports;},OffscreenCanvas:class{constructor(w,h){this.width=w;this.height=h;}getContext(){return {drawImage(){}};}}};
+vm.runInNewContext(fs.readFileSync('public/face-monitor.js','utf8'),context);
+void context.self.onmessage({data:{type:'init'}});
+await new Promise(resolve=>setTimeout(resolve,10));
+assert(messages.some(m=>m.type==='ready'),'Face readiness must not wait for optional landmarks');
+await context.self.onmessage({data:{type:'frame',frame:{width:640,height:480,close(){}},timestamp:1000}});
+assert(messages.some(m=>m.type==='result'&&m.count===1),'Required face check must work while landmarks load');
+console.log('Passed: face readiness and inference continue while optional landmarks are pending.');

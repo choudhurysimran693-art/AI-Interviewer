@@ -103,6 +103,8 @@ async def janitor(stop):
 @asynccontextmanager
 async def lifespan(app):
     init_db()
+    from .rounds import activate_aptitude_first
+    activate_aptitude_first()
     stop = asyncio.Event()
     from .email_delivery import email_worker
     tasks = [asyncio.create_task(worker(stop)), asyncio.create_task(janitor(stop)),asyncio.create_task(email_worker(stop))]
@@ -120,8 +122,12 @@ from .analytics import router as analytics_router
 app.include_router(analytics_router)
 from .candidates import router as candidates_router
 app.include_router(candidates_router)
+from .interviews import router as interviews_router
+app.include_router(interviews_router)
 app.include_router(recruitment_router)
 app.include_router(positions_router)
+from .practice_analysis import router as practice_analysis_router
+app.include_router(practice_analysis_router)
 app.include_router(candidate_router)
 app.include_router(applications_router)
 from .screening import router as screening_router
@@ -213,6 +219,17 @@ def active_session(sid, db, authorization, mutable=True, evidence_only=False):
         if not user or user.role!='candidate' or s.body['user_id']!=user.id:raise HTTPException(404,'Session not found.')
     if s.expires <= time.time() or s.status == 'deleting':
         raise HTTPException(410, 'Session expired or deleted.')
+    if settings.require_sequential_interviews and s.mode=='hr' and not s.body.get('application_round_id') and s.status!='complete':
+        raise HTTPException(409,'This is a legacy spoken interview. Open My applications to start Aptitude. HR must enable the standard rounds if no round is available.')
+    if s.body.get('application_round_id'):
+        from .db import ApplicationRound, InterviewRound
+        entry=db.get(ApplicationRound,s.body['application_round_id'])
+        definition=db.get(InterviewRound,entry.round_id) if entry else None
+        if definition:
+            from .rounds import mode as round_mode
+            s.body=s.body|{'round_type':definition.round_type,'evaluation_mode':round_mode(definition)}
+    if mutable and s.body.get('application_round_id') and s.body.get('round_type')=='resume_screening':
+        raise HTTPException(409,'Resume screening is a document review. Ask HR to approve it in Applications; aptitude opens next.')
     if mutable and s.status in ['complete', 'terminated']:
         raise HTTPException(409, 'Assessment is finalized.')
     return s
@@ -260,7 +277,7 @@ def health():
 @app.get('/api/ready')
 def ready(db=Depends(database)):
     db.execute(select(1))
-    return {'status': 'ready', 'environment': settings.environment, 'ai_configured': bool(settings.gemini_api_key),
+    return {'workflow_version':'aptitude-direct-2026-11-04','sequential_interviews':settings.require_sequential_interviews,'status': 'ready', 'environment': settings.environment, 'ai_configured': bool(settings.gemini_api_key),
             'storage': 'supabase' if storage.remote else 'local development', 'detector': validation_status()}
 
 
@@ -301,13 +318,29 @@ def create_session(data: SessionInput, db=Depends(database)):
         assignment=db.get(Assignment,data.assignment_id,with_for_update=True) if data.assignment_id else None
         if not assignment or assignment.candidate_id!=user.id:raise HTTPException(403,'HR screening requires an assigned examination.')
         if assignment.session_id:raise HTTPException(409,'An attempt already exists. Resume it from your dashboard.')
+        if assignment.body.get('status')=='cancelled':raise HTTPException(409,'This interview was cancelled by HR.')
         if assignment.body.get('status')=='attempt_deleted':raise HTTPException(409,'Ask HR to assign a new examination.')
 
         exam=db.get(Examination,assignment.exam_id)
+        if settings.require_sequential_interviews and not assignment.body.get('application_round_id'):
+            raise HTTPException(409,'This invitation is not linked to a hiring round. Open My applications to start Aptitude, or ask HR to enable the standard rounds.')
+        if not assignment.body.get('application_round_id'):
+            from .db import Application
+            from .rounds import rounds as linked_rounds
+            application_id=assignment.body.get('application_id') or exam.body.get('application_id')
+            if application_id and linked_rounds(db,application_id):
+                raise HTTPException(409,'This is an older interview invitation. Open My applications and use Start Round for the current assessment; aptitude is the first test after resume approval.')
         if assignment.body.get('application_round_id'):
             from .db import ApplicationRound, Application
             round_entry=db.get(ApplicationRound,assignment.body['application_round_id'])
             application=db.get(Application,round_entry.application_id)
+            from .db import InterviewRound
+            if db.get(InterviewRound,round_entry.round_id).round_type=='resume_screening':
+                raise HTTPException(409,'Resume screening is a document review. Ask HR to approve it in Applications; aptitude opens next.')
+            from .rounds import rounds as application_rounds, mode as round_mode
+            for earlier in application_rounds(db,application.id):
+                if earlier.id==round_entry.id:break
+                if earlier.status!='passed':raise HTTPException(409,'The previous rounds must be passed first.')
             if round_entry.status!='invited' or application.status=='rejected':
                 raise HTTPException(409,'This round is not available to start.')
         from .accounts import organization_scope
@@ -340,7 +373,7 @@ def create_session(data: SessionInput, db=Depends(database)):
         assignment.session_id=s.id
         if assignment.body.get('application_round_id'):
             round_entry.interview_session_id=s.id;round_entry.status='in_progress'
-            s.body=s.body|{'application_round_id':round_entry.id,'round_type':exam.body.get('round_type'),'evaluation_mode':exam.body.get('evaluation_mode','ai_conducted')}
+            s.body=s.body|{'application_round_id':round_entry.id,'round_type':db.get(InterviewRound,round_entry.round_id).round_type,'evaluation_mode':round_mode(db.get(InterviewRound,round_entry.round_id))}
         s.body=s.body|{'application_id':assignment.body.get('application_id'),'position_id':assignment.body.get('position_id')}
         db.add(Report(session_id=s.id,role='hr',token_hash=digest(report_token(s.id,'hr')),body={'live':True}))
     db.commit()
@@ -372,6 +405,11 @@ def cancel_session(sid: str, authorization: str = Header(''), db=Depends(databas
 async def questions(sid: str, authorization: str = Header(''), db=Depends(database)):
     s = active_session(sid, db, authorization)
     existing = db.scalars(select(Question).where(Question.session_id == sid)).all()
+    if s.body.get('round_type') in ('aptitude','technical') and existing and any(q.body.get('source')!='bank_mcq' for q in existing):
+        if db.scalar(select(Answer).where(Answer.session_id==sid)):
+            raise HTTPException(409,'This older attempt contains answers from a different round. Ask HR for a fresh assessment invitation.')
+        for question in existing:db.delete(question)
+        db.flush();existing=[]
     if not existing:
         from .round_questions import select_questions
         rows = select_questions(db,s.body.get('round_type'),s.body['level'])

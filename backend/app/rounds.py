@@ -7,6 +7,7 @@ from sqlalchemy import select, delete, update
 from .accounts import require_user, organization_scope
 from .db import DB, InterviewRound, ApplicationRound, Application, RecruitmentPosition, Examination, Assignment, Session, User, uid
 from .candidate_notices import add_notice
+from .config import settings
 from .proctoring import ProctorConfig
 
 router=APIRouter(prefix='/api')
@@ -23,6 +24,7 @@ class RoundInput(BaseModel):
 
     @model_validator(mode='after')
     def valid_mode(self):
+        if self.round_type=='resume_screening':self.evaluation_mode='auto_evaluated'
         if self.round_type=='final_interview':self.evaluation_mode='human_only'
         if self.evaluation_mode=='auto_evaluated' and self.round_type!='resume_screening':
             raise ValueError('Automatic resume evaluation is only available for resume screening.')
@@ -62,16 +64,24 @@ def definition(d):
     return {'round_type':d.round_type,'round_name':d.round_name,'is_active':d.is_active, **(d.settings or {}), 'evaluation_mode':mode(d)}
 
 def definitions(db,pid):
-    return list(db.scalars(select(InterviewRound).where(InterviewRound.position_id==pid).order_by(InterviewRound.round_order)))
+    return [d for d in db.scalars(select(InterviewRound).where(InterviewRound.position_id==pid).order_by(InterviewRound.round_order)) if settings.include_resume_screening_round or d.round_type!='resume_screening']
 
 def rounds(db,aid):
-    return list(db.scalars(select(ApplicationRound).join(InterviewRound).where(ApplicationRound.application_id==aid).order_by(InterviewRound.round_order)))
+    query=select(ApplicationRound).join(InterviewRound).where(ApplicationRound.application_id==aid)
+    if not settings.include_resume_screening_round:query=query.where(InterviewRound.round_type!='resume_screening')
+    return list(db.scalars(query.order_by(InterviewRound.round_order)))
 
 def history(db,a,hr=False):
     result=[]
-    for r in rounds(db,a.id):
+    entries=rounds(db,a.id)
+    current=next((entry.id for entry in entries if entry.status!='passed'),None) if a.status not in ('rejected','hired') else None
+    for r in entries:
         d=db.get(InterviewRound,r.round_id)
         item={'id':r.id,'round_id':d.id,'round_name':d.round_name,'round_type':d.round_type,'round_order':d.round_order,'status':r.status,'invited_at':r.invited_at,'completed_at':r.completed_at,'assignment_id':r.assignment_id}
+        item.update(is_current=r.id==current,can_start=r.id==current and r.status=='invited' and bool(r.assignment_id),can_resume=r.id==current and r.status=='in_progress' and bool(r.assignment_id),resume_session_id=r.interview_session_id if r.id==current and r.status=='in_progress' else None)
+        if hr:
+            from .round_engine import recommendation,HANDLERS
+            item.update(recommendation=recommendation(d.round_type,r.score),pass_threshold=HANDLERS.get(d.round_type,{}).get('threshold'))
         item.update(evaluation_mode=mode(d), scheduled_at=(r.scheduling or {}).get('scheduled_at'), scheduling_details=(r.scheduling or {}).get('details',''))
         if hr:item.update(score=r.score,hr_notes=r.hr_notes,interview_session_id=r.interview_session_id)
         result.append(item)
@@ -124,7 +134,19 @@ def invite(db,a,r,user,window=None):
     return r
 
 def initialize(db,a,user):
-    if rounds(db,a.id):return
+    existing=rounds(db,a.id)
+    if existing:
+        if not settings.include_resume_screening_round and a.status=='shortlisted' and all(r.status=='pending' for r in existing):
+            invite(db,a,existing[0],user)
+            from .notifier import notify
+            notify(a.id,'next_round',0,db=db)
+        return
+    if settings.require_sequential_interviews and not definitions(db,a.position_id):
+        from .round_templates import STANDARD
+        db.get(RecruitmentPosition,a.position_id,with_for_update=True)
+        for number,(kind,name,evaluation,instructions) in enumerate(STANDARD,1):
+            db.add(InterviewRound(position_id=a.position_id,round_order=number,round_type=kind,round_name=name,is_active=True,settings={'evaluation_mode':evaluation,'default_instructions':instructions,'decision_mode':'hr_review'}))
+        db.flush()
     for d in definitions(db,a.position_id):
         if d.is_active:db.add(ApplicationRound(application_id=a.id,round_id=d.id))
     db.flush();entries=rounds(db,a.id)
@@ -133,9 +155,13 @@ def initialize(db,a,user):
         if mode(d)=='auto_evaluated':
             from .screening import screen
             screen(db,a)
-            first.status='passed';first.completed_at=time.time();first.hr_notes='Passed by HR shortlisting this application.'
-            if len(entries)>1:invite(db,a,entries[1],user)
-        else:invite(db,a,first,user)
+            first.status='completed';first.completed_at=time.time()
+            apply_decision(db,first,a,user,DecisionInput(status='passed',hr_notes='Passed by HR shortlisting this application.'))
+        else:
+            invite(db,a,first,user)
+            if not settings.include_resume_screening_round:
+                from .notifier import notify
+                notify(a.id,'next_round',0,db=db)
 
 def complete_session(db,s):
     rid=s.body.get('application_round_id')
@@ -205,7 +231,7 @@ def apply_template(pid:str,body:TemplateInput):
     require_user('hr','admin')
     from .round_templates import seed, items
     with DB() as db:
-        seed(db);db.commit();rows=items(db,body.template_id)
+        seed(db);db.commit();rows=[r for r in items(db,body.template_id) if settings.include_resume_screening_round or r.round_type!='resume_screening']
         if not rows:raise HTTPException(404,'Template not found.')
         sequence=SequenceInput(rounds=[RoundInput(round_type=r.round_type,round_name=r.round_name,evaluation_mode=r.evaluation_mode,default_instructions=r.default_instructions) for r in rows])
     return define_rounds(pid,sequence)
@@ -257,34 +283,10 @@ def decide(rid:str,body:DecisionInput):
         result=apply_decision(db,r,a,user,body);db.commit();return result
 
 def apply_decision(db,r,a,user,body):
-    if r.status==body.status:return history(db,a,True)
-    d=db.get(InterviewRound,r.round_id)
-    manual=mode(d)=='human_only' and r.status=='scheduled'
-    if manual and (r.scheduling or {}).get('scheduled_at',float('inf'))>time.time():raise HTTPException(409,'Record the outcome after the scheduled interview.')
-    if manual and not body.hr_notes.strip():raise HTTPException(422,'Record notes for the human interview decision.')
-    if a.status=='rejected' or (r.status!='completed' and not manual):raise HTTPException(409,'Only a completed, undecided round can receive a decision.')
-    claimed=db.execute(update(ApplicationRound).where(ApplicationRound.id==r.id,ApplicationRound.status==r.status).values(status=body.status))
-    if claimed.rowcount!=1:raise HTTPException(409,'A decision was already recorded. Refresh this application.')
-    r.completed_at=r.completed_at or time.time()
-    r.status=body.status;r.hr_notes=body.hr_notes;a.updated_at=time.time()
-    d=db.get(InterviewRound,r.round_id);p=db.get(RecruitmentPosition,a.position_id)
-    entries=rounds(db,a.id);following=next((x for x in entries if x.status=='pending'),None)
-    if body.status=='failed':
-        a.status='rejected';message='Thank you for your time and interest in '+p.body['title']+'. We will not be moving forward with your application.'
-    else:
-        message='You passed '+d.round_name+' for '+p.body['title']+'. '
-        if following:
-            invite(db,a,following,user);message+='Your next round is '+db.get(InterviewRound,following.round_id).round_name+'. '+('Details will be shared separately.' if following.status=='awaiting_scheduling' else 'See the invitation for your assessment window.')
-        else:
-            if d.round_type=='final_interview':
-                from .applications import transition
-                a.status='ready_for_offer'
-                transition(db,a,'offer_extended',user)
-                transition(db,a,'hired',user)
-            else:a.status='ready_for_offer'
-            message+=('HR has recorded a hire decision and will contact you with next steps.' if a.status=='hired' else 'All rounds are complete. HR will contact you about the final decision.')
-    add_notice(db,a.candidate_id,'round-result:'+r.id,d.round_name+' result',message,'/candidate/applications',user.id,type='round_result',related_application_round_id=r.id)
-    return history(db,a,True)
+    """Compatibility adapter for existing API and assessment completion callers."""
+    from .round_engine import complete_round
+    number=db.get(InterviewRound,r.round_id).round_order
+    return complete_round(db,a.id,number,r.score,user=user,decision=body.status,notes=body.hr_notes)
 
 @router.delete('/positions/{pid}/rounds')
 def clear_rounds(pid:str):
@@ -296,3 +298,73 @@ def clear_rounds(pid:str):
             raise HTTPException(409,'Rounds cannot be changed after candidates enter this pipeline.')
         db.execute(delete(InterviewRound).where(InterviewRound.position_id==pid));db.commit()
         return {'saved':True}
+
+
+@router.post('/application-rounds/{rid}/approve-resume')
+def approve_resume(rid: str):
+    """HR approves document screening, replacing a legacy spoken-resume assignment."""
+    user=require_user('hr','admin')
+    with DB() as db:
+        r,a=owned_round(db,rid,user)
+        d=db.get(InterviewRound,r.round_id)
+        if d.round_type!='resume_screening':raise HTTPException(409,'This action is only for resume screening.')
+        if r.status=='passed':return history(db,a,True)
+        if a.status in ('rejected','hired') or r.status=='failed':raise HTTPException(409,'This application is closed.')
+        entries=rounds(db,a.id)
+        if entries[0].id!=r.id:raise HTTPException(409,'Resume screening must be the first round.')
+        from .screening import screen
+        screen(db,a)
+        if r.assignment_id:
+            old=db.get(Assignment,r.assignment_id)
+            if old:old.body=old.body|{'status':'cancelled','cancellation_reason':'Replaced by HR resume screening review.'}
+            if a.assignment_id==r.assignment_id:a.assignment_id=None
+        r.assignment_id=None;r.interview_session_id=None
+        r.status='completed';r.completed_at=time.time();r.score=None
+        result=apply_decision(db,r,a,user,DecisionInput(status='passed',hr_notes='Resume reviewed and approved by HR. Legacy spoken screening replaced where applicable.'))
+        db.commit()
+        return result
+
+
+@router.post('/applications/{aid}/enable-standard-rounds')
+def enable_standard_rounds(aid: str):
+    """Explicit HR repair for shortlisted applications that only have generic invitations."""
+    user=require_user('hr','admin')
+    from .applications import owned
+    from .round_templates import STANDARD
+    with DB() as db:
+        a=owned(db,aid,user)
+        if a.status!='shortlisted':raise HTTPException(409,'Review and shortlist the application first.')
+        if rounds(db,a.id):raise HTTPException(409,'This application already has rounds. Use its current round actions.')
+        position=db.get(RecruitmentPosition,a.position_id,with_for_update=True)
+        defs=definitions(db,position.id)
+        if defs and [d.round_type for d in defs if d.is_active]!=[r[0] for r in STANDARD if settings.include_resume_screening_round or r[0]!='resume_screening']:
+            raise HTTPException(409,'Configure the standard six-round template for this role first.')
+        if not defs:
+            for number,(kind,name,evaluation,instructions) in enumerate(STANDARD,1):
+                db.add(InterviewRound(position_id=position.id,round_order=number,round_type=kind,round_name=name,is_active=True,settings={'evaluation_mode':evaluation,'default_instructions':instructions,'decision_mode':'hr_review'}))
+            db.flush()
+        old_id=a.assignment_id
+        if old_id:
+            old=db.get(Assignment,old_id)
+            if old:old.body=old.body|{'status':'cancelled','cancellation_reason':'Replaced by standard sequential rounds; previous answers retained.'}
+            a.assignment_id=None
+        initialize(db,a,user)
+        db.commit()
+        return history(db,a,True)
+
+
+def activate_aptitude_first():
+    """Retain retired screening records while activating already-shortlisted candidates."""
+    if settings.include_resume_screening_round:return
+    with DB() as db:
+        applications=list(db.scalars(select(Application).where(Application.status=='shortlisted')))
+        for application in applications:
+            position=db.get(RecruitmentPosition,application.position_id)
+            user=db.get(User,position.hr_id)
+            legacy=list(db.scalars(select(ApplicationRound).join(InterviewRound).where(ApplicationRound.application_id==application.id,InterviewRound.round_type=='resume_screening')))
+            for row in legacy:
+                if row.assignment_id:
+                    old=db.get(Assignment,row.assignment_id)
+                    if old and old.body.get('status')!='cancelled':old.body=old.body|{'status':'cancelled','cancellation_reason':'Resume screening round retired; aptitude is the first test.'}
+            initialize(db,application,user)
+        db.commit()

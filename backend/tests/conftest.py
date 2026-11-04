@@ -13,6 +13,8 @@ os.environ['BREVO_API_KEY'] = ''
 os.environ['EMAIL_FROM'] = ''
 os.environ['EMAIL_PROVIDER'] = 'smtp'
 os.environ['ENVIRONMENT'] = 'development'
+os.environ['INCLUDE_RESUME_SCREENING_ROUND'] = 'true' # Legacy six-round compatibility coverage.
+os.environ['REQUIRE_SEQUENTIAL_INTERVIEWS'] = 'false' # Legacy standalone-interview compatibility tests; strict workflow tests enable it explicitly.
 os.environ['ENABLE_DEMO_DATA'] = 'true' # Legacy demo tests opt in explicitly.
 import pytest
 from fastapi.testclient import TestClient
