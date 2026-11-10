@@ -771,16 +771,22 @@ def complete(sid: str, authorization: str = Header(''), db=Depends(database)):
     s = active_session(sid, db, authorization, False)
     if s.status=='terminated':raise HTTPException(409,'Examination terminated.')
     if s.status != 'complete':
-        monitored(s)
         answers = db.scalars(select(Answer).where(Answer.session_id == sid)).all()
         question_ids = set(db.scalars(select(Question.id).where(Question.session_id == sid)))
         if not question_ids or len(answers) != len(question_ids) or {a.body.get('question_id') for a in answers} != question_ids or any(not a.body['approved'] or a.body['evaluation']['status'] == 'pending' for a in answers):
             raise HTTPException(409, 'Every question requires an approved answer with a finished evaluation attempt.')
+        missing_evidence = []
         for o in db.scalars(select(Observation).where(Observation.session_id == sid)):
             if o.body['type'] == 'device' and s.mode == 'hr':
                 snap = db.get(Snapshot, o.id)
                 if not snap or not snap.body.get('ready'):
-                    raise HTTPException(409, 'A device evidence picture has not finished uploading.')
+                    missing_evidence.append(o.id)
+        # Saved answers can be finalized even when supplementary image storage fails.
+        # Preserve the event and explicitly flag the missing evidence for HR review.
+        if missing_evidence:
+            s.body = s.body | {'missing_evidence': missing_evidence,
+                'security': s.body.get('security', {}) | {'review_required': True}}
+            notify(db,s,'evidence_incomplete','Device evidence unavailable at completion; review required','medium')
         summary = aggregate([a.body['evaluation'] for a in answers])
         s.body = s.body | {'summary': summary,'ended_at':time.time()}
         s.status = 'complete'
@@ -819,7 +825,7 @@ def report(token: str, db=Depends(database)):
     return {'role': r.role, 'mode': s.mode, 'name': s.body['name'], 'target_role': s.body['role'], 'expires': s.expires,
         'summary': summary, 'questions': [{'id': q.id, **q.body} for q in questions],
         'answers': [{'id': a.id, **a.body, 'ai_evaluation':a.body['evaluation'],'evaluation':effective_evaluation(a)} for a in answers], 'observations': observations,
-        'proctor_summary': s.body.get('proctor_summary') or summarize(observations, s.body.get('proctor_config') or load_config(settings.proctor_config_file)),
+        'proctor_summary': (s.body.get('proctor_summary') or summarize(observations, s.body.get('proctor_config') or load_config(settings.proctor_config_file))) | ({'review_required': True} if s.body.get('missing_evidence') else {}),
         'feelings_available': r.role == 'candidate' or s.body['share_feelings'], 'share_feelings': s.body['share_feelings'],
         'monitoring': {k: v for k, v in s.body.get('monitoring', {}).items() if k in ['face_coverage', 'object_coverage']},
         'hr_link': f'/report/{report_token(s.id, "hr")}' if r.role == 'candidate' and s.mode == 'hr' else None}
